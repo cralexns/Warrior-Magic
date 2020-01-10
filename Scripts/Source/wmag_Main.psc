@@ -71,7 +71,7 @@ Event OnInit()
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
 		SpellChargeMode = new int[2]
-		SpellChargeMode[0] = SPELLCHARGE_SPELLBASED
+		SpellChargeMode[0] = SPELLCHARGE_NONE
 		SpellChargeMode[1] = SPELLCHARGE_SPELLBASED
 
 		SpellReleaseMode = new int[2]
@@ -138,6 +138,12 @@ Function Reset()
 EndFunction
 
 Event OnPlayerLoadGame()
+	If !CheckIfPapyrusUtilInstalled()
+		Log("Warrior Magic couldn't find PapyrusUtil, please make sure you've installed PapyrusUtil - you can find this requirement on the mod page on Nexus.", LogSeverity_Error)
+		GoToState("Disabled")
+		return
+	EndIf
+
 	RegisterEvents()
 	RegisterKeys()
 	CheckIfPapyrusExtenderInstalled()
@@ -201,6 +207,15 @@ Function CheckIfPapyrusExtenderInstalled()
 			Log("PapyrusExtenderInstalled = " + PapyrusExtenderInstalled, LogSeverity_Debug)
 		EndIf
 	EndIf
+EndFunction
+
+bool Function CheckIfPapyrusUtilInstalled()
+	Log("Checking if PapyrusUtil is installed..", LogSeverity_Debug)
+	string[] testArray = PapyrusUtil.StringArray(1, "PUTest")
+	If testArray.Length == 1 && testArray[0] == "PUTest"
+		return True
+	EndIf
+	return False
 EndFunction
 
 
@@ -651,8 +666,7 @@ State Charging
 		chargeMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_CHARGE", SpellChargeMode[isOffensiveSpell as int])
 		chargedReleaseMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_RELEASE", SpellReleaseMode[isOffensiveSpell as int])
 
-		float minChargeTime = MinimumChargeTime[isOffensiveSpell as int]
-		float maxChargeTime = MaximumChargeTime[isOffensiveSpell as int]
+		
 
 		;int deliveryType = m.GetDeliveryType()
 
@@ -665,8 +679,11 @@ State Charging
 			float castTime = chargingSpell.GetCastTime()
 
 			If chargeMode == SPELLCHARGE_SPELLBASED
-				chargeTimeRequired = MaxFloat(minChargeTime, castTime)
+				chargeTimeRequired = castTime
 			ElseIf chargeMode == SPELLCHARGE_MAXMAGIC
+				float minChargeTime = MinimumChargeTime[isOffensiveSpell as int]
+				float maxChargeTime = MaximumChargeTime[isOffensiveSpell as int]
+
 				float maxMagicka = PlayerRef.GetBaseActorValue("Magicka")
 				chargeTimeRequired = MaxFloat(maxChargeTime * MinFloat(effectiveCost / maxMagicka, 1.0), minChargeTime)
 			Else

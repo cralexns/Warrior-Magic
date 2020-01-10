@@ -277,15 +277,15 @@ Event OnPageReset(string page)
 		SetCursorPosition(14)
 		AddHeaderOption("Offensive Casting", IsOptionDisabled(true))
 		AddMenuOptionST("SpellChargeModeMenuO", "Charge Mode", chargeModes[Main.SpellChargeMode[1]])
-		AddSliderOptionST("MinimumChargeTimeSliderO", "Min. Charge Time", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == Main.SPELLCHARGE_NONE))
-		AddSliderOptionST("MaximumChargeTimeSliderO", "Max. Charge Time", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == Main.SPELLCHARGE_NONE))
+		AddSliderOptionST("MinimumChargeTimeSliderO", "Min. Charge Time", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
+		AddSliderOptionST("MaximumChargeTimeSliderO", "Max. Charge Time", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
 		AddMenuOptionST("SpellReleaseModeO", "Release Mode", releaseModes[Main.SpellReleaseMode[1]])
 
 		SetCursorPosition(15)
 		AddHeaderOption("Defensive Casting", IsOptionDisabled(true))
 		AddMenuOptionST("SpellChargeModeMenuD", "Charge Mode", chargeModes[Main.SpellChargeMode[0]])
-		AddSliderOptionST("MinimumChargeTimeSliderD", "Min. Charge Time", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == Main.SPELLCHARGE_NONE))
-		AddSliderOptionST("MaximumChargeTimeSliderD", "Max. Charge Time", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == Main.SPELLCHARGE_NONE))
+		AddSliderOptionST("MinimumChargeTimeSliderD", "Min. Charge Time", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
+		AddSliderOptionST("MaximumChargeTimeSliderD", "Max. Charge Time", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
 		AddMenuOptionST("SpellReleaseModeD", "Release Mode", releaseModes[Main.SpellReleaseMode[0]])
 
 
@@ -802,15 +802,15 @@ State SpellChargeModeMenuD
 	Event OnMenuAcceptST(int index)
 		Main.SpellChargeMode[0] = index
 		SetMenuOptionValueST(chargeModes[index])
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] == 0), true, "MinimumChargeTimeSliderD")
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] == 0), false, "MaximumChargeTimeSliderD")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC), true, "MinimumChargeTimeSliderD")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC), false, "MaximumChargeTimeSliderD")
 	EndEvent
 
 	Event OnDefaultST()
 		Main.SpellChargeMode[0] = 0
 		SetMenuOptionValueST(chargeModes[Main.SpellChargeMode[0]])
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] == 0), true, "MinimumChargeTimeSliderD")
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] == 0), false, "MaximumChargeTimeSliderD")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC), true, "MinimumChargeTimeSliderD")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC), false, "MaximumChargeTimeSliderD")
 	EndEvent
 
 	Event OnHighlightST()
@@ -828,15 +828,15 @@ State SpellChargeModeMenuO
 	Event OnMenuAcceptST(int index)
 		Main.SpellChargeMode[1]= index
 		SetMenuOptionValueST(chargeModes[index])
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] == 0), true, "MinimumChargeTimeSliderO")
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] == 0), false, "MaximumChargeTimeSliderO")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC), true, "MinimumChargeTimeSliderO")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC), false, "MaximumChargeTimeSliderO")
 	EndEvent
 
 	Event OnDefaultST()
 		Main.SpellChargeMode[1] = 1
 		SetMenuOptionValueST(chargeModes[Main.SpellChargeMode[1]])
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] == 0), true, "MinimumChargeTimeSliderO")
-		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] == 0), false, "MaximumChargeTimeSliderO")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC), true, "MinimumChargeTimeSliderO")
+		SetOptionFlagsST(IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC), false, "MaximumChargeTimeSliderO")
 	EndEvent
 
 	Event OnHighlightST()
