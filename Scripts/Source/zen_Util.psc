@@ -156,6 +156,19 @@ string Function IntArrayToString(int[] array) global
 	return output
 EndFunction
 
+int[] Function StringToIntArray(string text, string delim) Global
+	string[] parts = StringUtil.Split(text, delim)
+	int idx = 0
+
+	int[] out = PapyrusUtil.IntArray(parts.length, 0)
+	While idx < parts.length 
+		out[idx] = parts[idx] as int
+		idx += 1
+	EndWhile
+
+	return out
+EndFunction
+
 float Function StringPercentageToFloat(string percentage) Global
 	int nPercent = percentage as Int
 	return nPercent / 100

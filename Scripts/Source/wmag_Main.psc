@@ -30,21 +30,20 @@ Perk Property SpellMod Auto
 
 bool Property IsCharging Auto Conditional
 
+bool Property DisableChargeAnimation = true Auto
+bool Property ConcentrationCastingFix = false Auto
+
 ;; Spell Release Settings
 int Property RELEASEMODE_MANUAL = 0 Auto
 int Property RELEASEMODE_KEYUP = 1 Auto
 int Property RELEASEMODE_AUTOMATIC = 2 Auto
-
-int[] Property SpellReleaseMode Auto
-
-; int Property SpellReleaseModeDefensive = 2 Auto
-; int Property SpellReleaseModeOffensive = 1 Auto
 
 ;; Spell Charging Settings
 int Property SPELLCHARGE_NONE = 0 Auto Hidden ;No spell charging - everything charges instantly.
 int Property SPELLCHARGE_SPELLBASED = 1 Auto Hidden ;Spell charge time is based on the cast time of the spell.
 int Property SPELLCHARGE_MAXMAGIC = 2 Auto Hidden ;Spell charge time is based on the amount of magicka required versus magicka pool
 
+int[] Property SpellReleaseMode Auto
 int[] Property SpellChargeMode Auto
 float[] Property MinimumChargeTime Auto
 float[] Property MaximumChargeTime Auto
@@ -54,24 +53,12 @@ float Property MaximumMagnitudeModifier = 1.5 Auto
 
 int Property DispelKeyModifier = 56 Auto
 
-; int Property SpellChargeModeOffensive = 1 Auto
-; float Property MinimumChargeTimeOffensive = 0.25 Auto
-; float Property MaximumChargeTimeOffensive = 3.0 Auto
-
-; int Property SpellChargeModeDefensive = 0 Auto
-; float Property MinimumChargeTimeDefensive = 0.25 Auto
-; float Property MaximumChargeTimeDefensive = 3.0 Auto
-
-; StorageUtil - Data Names
-; string Property OffensiveQueueName = "OffensiveSpellQueue" Auto Hidden
-; string Property DefensiveQueueName = "DefensiveSpellQueue" Auto Hidden
-
 string Property KeyBindingIndexName = "KeyBindingIndex" Auto Hidden ; TODO: Add cycle spells to keybindings.
 
 string Property ChargedBeginLatencyName = "Latency1" Auto
 string Property ChargedDoneLatencyName = "Latency2" Auto
 
-; bool Property RefreshCachedSettings = true Auto
+int[] validWeaponTypes
 
 ;/
 	TODO:
@@ -79,7 +66,9 @@ string Property ChargedDoneLatencyName = "Latency2" Auto
 /;
 
 Event OnInit()
-	Version = 0.81
+	Version = 0.85
+	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,10", ",")
+
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
 		SpellChargeMode = new int[2]
 		SpellChargeMode[0] = SPELLCHARGE_SPELLBASED
@@ -134,17 +123,16 @@ Function Stop()
 	Log("Stopping.. State="+GetState()+" ("+chargedState+","+chargedSpell+","+isBusy+","+keyCodeInterruptCast+")", LogSeverity_Debug)
 	
 	StorageUtil.ClearAllPrefix("WMAG_CACHE")
-	; StorageUtil.ClearAllObjPrefix(self, OffensiveQueueName)
-	; StorageUtil.ClearAllObjPrefix(self, DefensiveQueueName)
+
 	StorageUtil.ClearAllObjPrefix(self, ChargedBeginLatencyName)
 	StorageUtil.ClearAllObjPrefix(self, ChargedDoneLatencyName)
+	Config.ResetSpellsCache()
 
 	GoToState("Disabled")
 	parent.Stop()
 EndFunction
 
 Function Reset()
-	;RefreshCachedSettings = true
 	GoToState("")
 	GoToState("Normal")
 EndFunction
@@ -154,7 +142,7 @@ Event OnPlayerLoadGame()
 	RegisterKeys()
 	CheckIfPapyrusExtenderInstalled()
 
-	IsCharging = true
+	;IsCharging = true
 
 	ToggleSweepingPerk(Config.EnableSweepingAttacks)
 
@@ -357,45 +345,6 @@ Form[] Function GetAllMappedSpells()
 	;return StorageUtil.FormListToArray(self, KeyBindingIndexName)
 EndFunction
 
-
-;/  ----
-	SPELL QUEUE FUNCTIONS	
-/;
-
-; bool Function AddSpellToQueue(string queueName, Spell spellToQueue, int castingType)
-; 	int queueIndex = StorageUtil.FormListAdd(self, queueName, spellToQueue, true)
-; 	If queueIndex < 0
-; 		Log("Adding to queue ("+queueName+") failed.", LogSeverity_Error)
-; 		return false
-; 	EndIf
-; 	If StorageUtil.IntListAdd(self, queueName + "_Type", castingType, true) != queueIndex
-; 		Log("Queue Index mismatch int:castingType - removing spell from queue.", LogSeverity_Error)
-; 		StorageUtil.FormListRemoveAt(self, queueName, queueIndex)
-; 		StorageUtil.IntListPop(self, queueName + "_Type")
-; 		return false
-; 	EndIf
-; 	return true
-; EndFunction
-
-; int Function GetSpellIndex(int keyCode, string queueName)
-; 	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
-; 	Spell spellForKey = StorageUtil.FormListGet(self, KeyBindingIndexName, keyIndex) as Spell
-; 	If spellForKey
-; 		return StorageUtil.FormListFind(self, queueName, spellForKey)
-; 	EndIf
-; 	return 0
-; EndFunction
-
-; bool Function RemoveSpellFromQueue(Spell spellToRemove, string queueName)
-; 	int queueIndex = StorageUtil.FormListFind(self, queueName, spellToRemove)
-; 	If queueIndex != -1 && StorageUtil.FormListPluck(self, queueName, queueIndex, None) != None
-; 		StorageUtil.IntListPluck(self, queueName + "_Type", queueIndex, -1)
-; 		return true
-; 	EndIf
-; 	return false
-; EndFunction
-
-
 ;/  ----
 	UTILITY FUNCTIONS
 /;
@@ -489,17 +438,6 @@ Sound Function GetSoundEffectFor(MagicEffect mgef, int soundEffectType)
 	return SoundEffects.GetAt(0) as Sound
 EndFunction
 
-; bool Function AutoCast(bool isConcentration, bool isWeaponDrawn, int autoCastMode)
-; 	If autoCastMode == Config.AUTOCAST_DISABLED
-; 		return False
-; 	ElseIf !isWeaponDrawn ;;Math.LogicalAnd(autoCastMode, Config.AUTOCAST_WEAPONDRAWN) == Config.AUTOCAST_WEAPONDRAWN && !isWeaponDrawn
-; 		return False
-; 	ElseIf Math.LogicalAnd(autoCastMode, Config.AUTOCAST_CONCENTRATION) == Config.AUTOCAST_CONCENTRATION && !isConcentration
-; 		return False
-; 	EndIf
-; 	return true
-; EndFunction
-
 Function LatencyMaintenance(string keyName, int maxSize = 100, bool empty = false)
 	int len = StorageUtil.FloatListCount(self, keyName)
 		If len >= maxSize
@@ -559,22 +497,6 @@ Event OnKeyDown(int keyCode)
 EndEvent
 
 Event OnKeyUp(int keyCode, float holdTime)
-	; If keyCode == keyCodeInterruptCast
-	; 	safetySpell = None
-	; 	If GetState() == "Blocking"
-	; 		;Log("OnKeyUp = " + keyCode + ", is blocking -> remove keyCodeIC and send blockStop AE")
-	; 		keyCodeInterruptCast = -1
-	; 		GoToState("Normal")
-	; 	ElseIf GetState() != "Attacking"
-	; 		;Log("OnKeyUp = " + keyCode + ", is attacking -> remove keyCodeIC and interrupt cast.")
-	; 		keyCodeInterruptCast = -1
-	; 		PlayerRef.InterruptCast()
-	; 	EndIf
-	; EndIf
-	; If keyCode == keyCodeInterruptCast
-	; 	string stateName = GetState()
-	; 	Log("KEYUP , KeyCode ("+keyCode+") == keyCodeInterruptCast ("+keyCodeInterruptCast+") .. State = " + stateName)
-	; EndIf
 EndEvent
 
 bool isCasting
@@ -583,61 +505,48 @@ Spell safetySpell
 Event OnCastStart(Actor akCaster, Actor akTarget)
 	;Log("OnCastStart()")
 	isCasting = true
-	;BruteForceCast()
 EndEvent
-
-Function BruteForceCast()
-	If !safetyEnabled || isSafetyRunning
-		return
-	EndIf
-
-	isSafetyRunning = true
-	While keyCodeInterruptCast != -1 && Input.IsKeyPressed(keyCodeInterruptCast)
-		If safetySpell
-			safetySpell.Cast(PlayerRef)	
-		EndIf
-		Utility.Wait(0.1)
-	EndWhile
-	isSafetyRunning = false
-	safetySpell = none
-EndFunction
 
 Event OnCastEnd(Actor akCaster, Actor akTarget)
-	;Log("OnCastEnd()")
 	isCasting = false
-	; If safetyEnabled && safetySpell && !isSafetyRunning && keyCodeInterruptCast != -1 && Input.IsKeyPressed(keyCodeInterruptCast)
-	; 	isSafetyRunning = true
-		
-	; 	bool canAfford = safetySpell.GetMagickaCost() < PlayerRef.GetActorValue("Magicka")
-	; 	If canAfford
-	; 		Log("We stopped casting but we're still holding key.. Recast!")
-	; 		;PlayerRef.InterruptCast()
-
-	; 		float timeout = 1
-	; 		While timeout > 0 && !isCasting && safetySpell && keyCodeInterruptCast != -1 && Input.IsKeyPressed(keyCodeInterruptCast)
-	; 			safetySpell.Cast(PlayerRef)
-	; 			timeout -= 0.1
-	; 			Utility.Wait(0.1)
-	; 		EndWhile
-	; 	EndIf
-
-	; 	isSafetyRunning = false
-	; EndIf
 EndEvent
+
+Event OnWeaponUnequipped(Weapon unequipped)
+	;Log("OnWeaponUnequipped: " + unequipped)
+	ValidateEquipped()
+EndEvent
+
+Event OnWeaponEquipped(Weapon equipped)
+	;Log("OnWeaponEquipped: " + equipped)
+	ValidateEquipped()
+EndEvent
+
+bool Function IsEquippedValid()
+	int leftType = PlayerRef.GetEquippedItemType(0)
+	int rightType = PlayerRef.GetEquippedItemType(1)
+
+	return validWeaponTypes.Find(leftType) != -1 || validWeaponTypes.Find(rightType) != -1
+EndFunction
+
+Function ValidateEquipped()
+	bool isValid = IsEquippedValid()
+	If isValid && GetState() == "Waiting"
+		GoToState("Normal")
+	ElseIf !isValid && GetState() != "Waiting"
+		GoToState("Waiting")
+	EndIf
+EndFunction
 
 ;/  ----
 	State: Normal (Default state)
 /;
 
-;bool bAllowRotation
-;bool bLeftHandAttack
 bool isBashing
 int keyCodeInterruptCast
 bool safetyEnabled
-int initiated
 State Normal
 	Event OnBeginState()
-		;Log("Normal: OnBeginState(), initiated = " + initiated)
+		;Log("Normal: OnBeginState()")
 		
 		If chargedShader != None
 			chargedShader.Stop(PlayerRef)
@@ -653,48 +562,11 @@ State Normal
 			readyInstanceId = 0
 		EndIf
 
-		; If queuedOffensiveSpell != None && keyCodeInterruptCast != -1 && Input.IsKeyPressed(keyCodeInterruptCast)
-		; 	GoToState("Attacking")
-		; EndIf
-
-		; If (queuedDefensiveSpell != None && keyCodeInterruptCast != -1 && Input.IsKeyPressed(keyCodeInterruptCast)) || PlayerRef.GetAnimationVariableBool("Isblocking")
-		; 	GoToState("Blocking")
-		; EndIf
-
-		; If initiated == 1
-		; 	Debug.SendAnimationEvent(PlayerRef, "blockStop")
-		; ElseIf initiated == 2
-		; 	Debug.SendAnimationEvent(PlayerRef, "attackStop")
-		; EndIf
-		; initiated = 0
-
-		; If RefreshCachedSettings
-		; 	safetyEnabled = Config.ConcentrationCastingFix
-		; 	allowDefensiveHotCasting = Config.AllowDefensiveHotCasting
-		; 	RefreshCachedSettings = false
-		; EndIf
-
 		LatencyMaintenance(ChargedBeginLatencyName)
 		LatencyMaintenance(ChargedDoneLatencyName)
 	EndEvent
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
 		;Log("Normal: OnAnimationEvent(), asEventName = " + asEventName)
-		; If GetState() != "Normal"
-		; 	return
-		; EndIf
-
-		; If asEventName == "weaponLeftSwing" || asEventName == "weaponSwing" || (keyCodeInterruptCast != -1 && asEventName == "PowerAttack_Start_end")
-		; 	;bAllowRotation = PlayerRef.GetAnimationVariableBool("bAllowRotation") ;isPowerAttack
-		; 	;bool isBlocking = PlayerRef.GetAnimationVariableBool("Isblocking")
-		; 	;bool isBashing = PlayerRef.GetAnimationVariableBool("IsBashing")
-		; 	;bLeftHandAttack = PlayerRef.GetAnimationVariableBool("bLeftHandAttack")
-
-		; 	GoToState("Attacking")
-		; EndIf
-
-		; If asEventName == "blockStartOut"
-		; 	GoToState("Blocking")
-		; EndIf
 	EndEvent
 
 	Event OnEndState()
@@ -702,15 +574,26 @@ State Normal
 	EndEvent
 EndState
 
+State Waiting
+	Event OnBeginState()
+		Log("Entering waiting state..")
+	EndEvent
+	Event OnKeyDown(int keyCode)
+		If !Utility.IsInMenuMode()
+			Log("Spell keybinds are disabled, waiting for valid equipped weapon(s).", LogSeverity_Warning)
+		EndIf
+	EndEvent
+	Event OnEndState()
+		Log("Exiting waiting state!")
+	EndEvent
+EndState
 
 ;/  ----
 	State: CHARGING
 	chargingInterval: Controls how fluid magicka is deducted while charging a spell
-	chargedShaderDuration: Sets the duration of the applied shader when a spell is charged successfully.
 /;
 
 float chargingInterval = 0.1
-float chargedShaderDuration = 0.1
 
 int chargeKeyCodeDown
 Spell chargingSpell
@@ -722,13 +605,13 @@ int chargingSpellCastingType
 bool chargingSpellIsHostile
 int chargingSpellTarget
 bool chargingSuccess
-EffectShader chargedShader
 int chargingSoundInstance
-Sound readySound
 bool cancelIdle
 int chargeMode
 bool isBusy
 bool weaponsDrawn
+bool isBlocking
+bool isAttacking
 State Charging
 	Event OnBeginState()
 		;Log("Charging: OnBeginState(), chargeKeyCodeDown = " + chargeKeyCodeDown)
@@ -743,17 +626,8 @@ State Charging
 		EndIf
 
 		chargingSpellIsHostile = chargingSpell.IsHostile()
-		;Log(chargingSpell.GetName() + " is hostile = " + chargingSpellIsHostile)
-		; If (chargingSpellIsHostile && StorageUtil.FormListCount(self, OffensiveQueueName) >= Config.OffensiveQueueMaxLength - 1) || (!chargingSpellIsHostile && StorageUtil.FormListCount(self, DefensiveQueueName) >= Config.DefensiveQueueMaxLength - 1) 
-		; 	;IsSpellQueueFull(OffensiveQueueName, Config.OffensiveQueueMaxLength)) || (!chargingSpellIsHostile && IsSpellQueueFull(DefensiveQueueName, Config.DefensiveQueueMaxLength))
-		; 	Log("Queue is full. (Offensive="+chargingSpellIsHostile+")", LogSeverity_Warning)
-		; 	GoToState("Normal")
-		; 	return
-		; EndIf
-
 		chargeStartTime = Utility.GetCurrentRealTime()
 
-		;chargedShader = StorageUtil.GetFormValue(chargingSpell, "WMAG_SHADER") as EffectShader
 		chargingSpellTarget = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_TARGET", -1) as int
 		chargingSpellCastingType = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", -1) as int
 
@@ -764,14 +638,12 @@ State Charging
 			StorageUtil.SetFormValue(chargingSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
 		EndIf
 
-		If chargingSpellCastingType == -1 ;|| chargingSpellTarget == -1
+		If chargingSpellCastingType == -1 || chargingSpellTarget == -1
 			chargingSpellCastingType = mEffect.GetCastingType()
 			chargingSpellTarget = mEffect.GetDeliveryType()
-			;chargedShader = GetEffectShaderForMGEF(mEffect)
 
 			StorageUtil.SetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", chargingSpellCastingType)
 			StorageUtil.SetIntValue(chargingSpell, "WMAG_CACHE_TARGET", chargingSpellTarget)
-			;StorageUtil.SetFormValue(chargingSpell, "WMAG_SHADER", chargedShader)
 		EndIf
 
 		bool isOffensiveSpell = chargingSpellIsHostile ;&& chargingSpellTarget == 0
@@ -781,16 +653,6 @@ State Charging
 
 		float minChargeTime = MinimumChargeTime[isOffensiveSpell as int]
 		float maxChargeTime = MaximumChargeTime[isOffensiveSpell as int]
-
-		; If isDefensiveSpell
-		; 	spellChargeMode = SpellChargeModeDefensive
-		; 	minChargeTime = MinimumChargeTimeDefensive
-		; 	maxChargeTime = MaximumChargeTimeDefensive
-		; Else
-		; 	spellChargeMode = SpellChargeModeOffensive
-		; 	minChargeTime = MinimumChargeTimeOffensive
-		; 	maxChargeTime = MaximumChargeTimeOffensive
-		; EndIf
 
 		;int deliveryType = m.GetDeliveryType()
 
@@ -845,7 +707,7 @@ State Charging
 
 		If chargeTimeRequired > 0
 			Sound chargingSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CHARGE)
-			If !isBlocking && !Config.DisableChargeAnimation
+			If !isBlocking && !DisableChargeAnimation
 				Debug.SendAnimationEvent(PlayerRef, "IdleCombatWeaponCheckStart")
 				cancelIdle = true
 			EndIf
@@ -870,12 +732,10 @@ State Charging
 	EndEvent
 
 	Event OnUpdate()
-		If chargeTimeRequired <= 0
+		float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
+		If !Input.IsKeyPressed(chargeKeyCodeDown)
 			return
 		EndIf
-
-		float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
-
 		;Log("Time Spent Charging = " + timeSpent + ", vs chargeTimeRequired = " + chargeTimeRequired)
 		
 		If chargingSpellCostPaid < chargingSpellCost
@@ -890,8 +750,6 @@ State Charging
 		EndIf
 
 		If (timeSpent >= chargeTimeRequired)
-			;chargingSuccess = true
-			; GoToState("Normal")
 			SetCharged(true)
 		ElseIf GetState() == "Charging"
 			RegisterForSingleUpdate(chargingInterval)
@@ -900,20 +758,13 @@ State Charging
 
 	Event OnKeyUp(int keyCode, float holdTime)
 		;Log("Charging: OnKeyUp=" + keyCode + ", chargeTimeRequired="+chargeTimeRequired)
-		; If (chargeKeyCodeDown == keyCode && chargeTimeRequired == -1) || (Utility.GetCurrentRealTime() - chargeStartTime) < chargeTimeRequired || chargingSpell == None
-		; 	GoToState("Normal")
-		; EndIf
 		If keyCode == chargeKeyCodeDown && chargeTimeRequired > 0
 			UnregisterForUpdate()
 
-			float timeout = 1.0
-			While timeout > 0 && chargeMode == -1
-				Utility.Wait(0.05)
-				timeout -= 0.05
-			EndWhile
+			float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
 			
 			float remainingCost = chargingSpellCost - chargingSpellCostPaid
-			chargingSuccess = (chargeMode == SPELLCHARGE_NONE || (Utility.GetCurrentRealTime() - chargeStartTime) >= chargeTimeRequired) && remainingCost > PlayerRef.GetActorValue("Magicka")
+			chargingSuccess = (chargeMode == SPELLCHARGE_NONE || timeSpent >= chargeTimeRequired) && remainingCost < PlayerRef.GetActorValue("Magicka")
 			If (chargingSuccess && chargingSpellCostPaid < chargingSpellCost)
 				PlayerRef.DamageActorValue("Magicka", remainingCost)
 				chargingSpellCostPaid += remainingCost
@@ -965,57 +816,8 @@ State Charging
 			Sound.StopInstance(chargingSoundInstance)
 		EndIf
 
-		;bool spellQueued = false
-		;bool isAutoCast = false
-		;chargedSpell = None
 		If chargingSuccess
-			; If readySound && chargingSpellCastingType != CASTINGTYPE_CONCENTRATION
-			; 	readySound.Play(PlayerRef)
-			; EndIf
-
-			;chargedShader.Play(PlayerRef, chargedShaderDuration)
-
-			; If Input.IsKeyPressed(chargeKeyCodeDown)
-			; 	keyCodeInterruptCast = chargeKeyCodeDown
-			; EndIf
-
-			; spellCastingType = chargingSpellCastingType
-			; spellTarget = chargingSpellTarget
-			; spellIsHostile = chargingSpellIsHostile
-			; chargedSpell = chargingSpell
-
-			;If Input.IsKeyPressed(chargeKeyCodeDown) || chargingSpellCastingType != CASTINGTYPE_CONCENTRATION
-				; bool weaponDrawn = PlayerRef.IsWeaponDrawn()
-				; If !weaponDrawn
-				; 	PlayerRef.DrawWeapon()
-				; 	Utility.Wait(0.1)
-				; EndIf
-				; If chargingSpellIsHostile ;&& AutoCast(chargingSpellCastingType == CASTINGTYPE_CONCENTRATION, weaponDrawn, Config.OffensiveQueueAuto)
-				; 	;keyCodeInterruptCast = chargeKeyCodeDown
-
-				; 	;Log("Auto Cast Offensive Spell = " + chargingSpell)
-
-				; 	;queuedOffensiveSpell = chargingSpell
-				; 	;queuedOffensiveCastingType = chargingSpellCastingType
-				; 	;isAutoCast = true
-
-				; 	Debug.SendAnimationEvent(PlayerRef, "attackStart")
-				; 	initiated = 2
-
-				; ElseIf !chargingSpellIsHostile ;&& AutoCast(chargingSpellCastingType == CASTINGTYPE_CONCENTRATION, weaponDrawn, Config.DefensiveQueueAuto)
-				; 	;keyCodeInterruptCast = chargeKeyCodeDown
-
-				; 	;Log("Auto Cast Defensive Spell = " + chargingSpell)
-
-				; 	;queuedDefensiveSpell = chargingSpell
-				; 	;queuedDefensiveCastingType = chargingSpellCastingType
-				; 	;isAutoCast = true
-
-				; 	Debug.SendAnimationEvent(PlayerRef, "blockStart")
-				; 	initiated = 1
-				; EndIf
-			;EndIf
-			;spellQueued = !isAutoCast && PrepareSpellForCasting(chargingSpellIsHostile, chargingSpell, chargingSpellCastingType) ;((chargingSpellIsHostile && AddSpellToQueue(OffensiveQueueName, chargingSpell, chargingSpellCastingType)) || (!chargingSpellIsHostile && AddSpellToQueue(DefensiveQueueName, chargingSpell, chargingSpellCastingType)))
+			
 		Else
 			Sound soundChargeFailure = SoundEffects.GetAt(2) as Sound
 			int failureInstanceId = soundChargeFailure.Play(PlayerRef)
@@ -1027,82 +829,19 @@ State Charging
 			EndIf
 		EndIf
 
-		; If (spellQueued || isAutoCast) && chargingSpellCostPaid < chargingSpellCost
-		; 	PlayerRef.DamageActorValue("Magicka", chargingSpellCost-chargingSpellCostPaid)
-		; EndIf
-
-		; if spellQueued
-		; 	If inputRegistrationTime > 0
-		; 		StorageUtil.FloatListAdd(self, QueueLatencyName, Utility.GetCurrentRealTime()-inputRegistrationTime)
-		; 		inputRegistrationTime = 0
-		; 	EndIf
-
-		; 	Sound soundChargeSuccess = SoundEffects.GetAt(1) as Sound
-		; 	soundChargeSuccess.Play(PlayerRef)
-
-		; 	chargedShader.Play(PlayerRef, chargedShaderDuration)
-
-		; 	;Log("Charged spell: " + chargingSpell.GetName() + " added to queue (offensive="+chargingSpellIsHostile+")")
-		; ElseIf !isAutoCast
-		; 	Sound soundChargeFailure = SoundEffects.GetAt(2) as Sound
-		; 	soundChargeFailure.Play(PlayerRef)
-
-		; 	If chargingSpellCostPaid > 0
-		; 		PlayerRef.RestoreActorValue("Magicka", chargingSpellCostPaid)
-		; 	EndIf
-
-		; 	ReverseCycleByKey(chargeKeyCodeDown)
-		; 	;Log("Spell not queued..")
-
-		; 	inputRegistrationTime = 0
-		; EndIf
-
 		chargeKeyCodeDown = 0
 		chargingSpellCostPaid = 0
-		;chargingSpell = None
-		;chargedShader = None
+		chargingSpellCost = -1
 		chargeTimeRequired = -1
 		chargeMode = -1
 		cancelIdle = false
+
 		If !chargingSuccess
 			isBusy = false
 		EndIf
+
 		chargingSuccess = false
 	EndEvent
-
-	; bool Function PrepareSpellForCasting(bool isOffensive, Spell spellToCast, int spellToCastType)
-	; 	if isOffensive
-	; 		If queuedOffensiveSpell == None
-	; 			queuedOffensiveSpell = spellToCast
-	; 			queuedOffensiveCastingType = spellToCastType
-	; 			return true
-	; 		EndIf
-
-	; 		; If concentrationToggle && spellToCastType == CASTINGTYPE_CONCENTRATION
-	; 		; 	If queuedOffensiveSpell == spellToCast
-	; 		; 		queuedOffensiveSpell = None
-	; 		; 		queuedOffensiveCastingType = -1
-	; 		; 		Log(spellToCast.GetName() + " toggled off.")
-	; 		; 		return false
-	; 		; 	EndIf
-
-	; 		; 	If RemoveSpellFromQueue(spellToCast, OffensiveQueueName)
-	; 		; 		Log(spellToCast.GetName() + " toggled off.")
-	; 		; 		return false
-	; 		; 	EndIf
-	; 		; EndIf
-
-	; 		return AddSpellToQueue(OffensiveQueueName, spellToCast, spellToCastType)
-	; 	Else
-	; 		If queuedDefensiveSpell == None
-	; 			queuedDefensiveSpell = spellToCast
-	; 			queuedDefensiveCastingType = spellToCastType
-	; 			return true
-	; 		EndIf
-
-	; 		return AddSpellToQueue(DefensiveQueueName, spellToCast, spellToCastType)
-	; 	EndIf
-	; EndFunction
 EndState
 
 Spell chargedSpell
@@ -1113,11 +852,14 @@ Sound releaseSound
 Sound concentrationSound
 int concentrationInstanceId
 int readyInstanceId
-bool spellCast
+bool isCharged
 int chargedReleaseMode
 int chargedState
+EffectShader chargedShader
+Sound readySound
 State Charged
 	Event OnBeginState()
+		isCharged = true
 		;Log("Charged["+chargedState+"]: OnBeginState(), spellIsHostile = " + spellIsHostile + ", spellTarget = " + spellTarget)
 		chargedState = 1
 		If inputRegistrationTime > 0
@@ -1133,6 +875,7 @@ State Charged
 
 		If chargedSpell == None
 			Log("Charged["+chargedState+"]: OnBeginState() chargedSpell == None. Abort", LogSeverity_Debug)
+			chargedState = -1
 			GoToState("Normal")
 			return
 		EndIf
@@ -1164,7 +907,7 @@ State Charged
 			chargedShader.Play(PlayerRef)
 		EndIf
 
-		StorageUtil.FloatListAdd(self, ChargedDoneLatencyName, Utility.GetCurrentRealTime()-chargedBeginTime)
+		StorageUtil.FloatListAdd(self, ChargedDoneLatencyName, Utility.GetCurrentRealTime() - chargedBeginTime)
 
 		chargedState = 2
 		AutoCast()
@@ -1204,7 +947,7 @@ State Charged
 				CastSpell()
 			ElseIf asEventName == "attackStop"
 				isAttacking = false
-				If spellCastingType == CASTINGTYPE_CONCENTRATION
+				If spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged
 					;Log("Charged["+chargedState+"]: OnAnimationEvent() - attackStop => Is Concentration. Go to Normal")
 					GoToState("Normal")
 				EndIf
@@ -1217,10 +960,10 @@ State Charged
 				CastSpell()
 			ElseIf asEventName == "blockStop"
 				isBlocking = false
-				If spellCastingType == CASTINGTYPE_CONCENTRATION ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
-					Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
-					GoToState("Normal")
-				EndIf
+				; If spellCastingType == CASTINGTYPE_CONCENTRATION && GetState() == "Charged" ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
+				; 	Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
+				; 	GoToState("Normal")
+				; EndIf
 			EndIf
 		EndIf
 	EndEvent
@@ -1237,8 +980,8 @@ State Charged
 					isBlocking = true
 					Debug.SendAnimationEvent(PlayerRef, "blockStart")
 				EndIf
-			ElseIf spellCastingType == CASTINGTYPE_CONCENTRATION
-				Log("Charged["+chargedState+"]: OnKeyUp() - keyCode == keyCodeInterruptCast AND Is Concentration. Go to Normal")
+			ElseIf spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged
+				;Log("Charged["+chargedState+"]: OnKeyUp() - keyCode == keyCodeInterruptCast AND Is Concentration. Go to Normal")
 				GoToState("Normal")
 			ElseIf isBlocking
 				Debug.SendAnimationEvent(PlayerRef, "blockStop")
@@ -1247,6 +990,7 @@ State Charged
 	EndEvent
 
 	Function CastSpell()
+		chargedState = 3
 		;Log("Charged["+chargedState+"]: CastSpell()")
 		If readyInstanceId != 0
 			Sound.StopInstance(readyInstanceId)
@@ -1283,22 +1027,9 @@ State Charged
 			Else
 				StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
 			EndIf
-		; ElseIf spellIsHostile && overcharge
-		; 	int eIdx = spellToCast.GetCostliestEffectIndex()
-		; 	MagicEffect ef = spellToCast.GetNthEffectMagicEffect(eIdx)
-		; 	float magnitude = spellToCast.GetNthEffectMagnitude(eIdx)
-
-		; 	If PlayerRef.HasMagicEffect(ef) && magnitude > 0
-		; 		int modCount = StorageUtil.AdjustIntValue(spellToCast, "WMAG_MODCOUNT", 1)
-		; 		float modAmount = MaximumMagnitudeModifier * (modCount as float / (modCount as float + 0.75))
-
-		; 		Log("Charging: Modding (#"+modCount+") magnitude ("+magnitude+") on charged spell: " + chargingSpell.GetName() + "x" + modAmount, LogSeverity_Debug)
-		; 		ModSpellsMagnitude.AddForm(spellToCast)
-		; 		PlayerRef.SetActorValue("Variable05", modAmount)
-		; 	Else
-		; 		StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
-		; 	EndIf
 		EndIf
+
+		chargedState = 4
 
 		spellToCast.Cast(PlayerRef)
 
@@ -1329,26 +1060,35 @@ State Charged
 				EndIf
 			EndIf
 		EndIf
+
+		
 	EndFunction
 
 	Event OnUpdate()
 		;Log("Charged["+chargedState+"]: OnUpdate(), Conc Casting Fix=" + Config.ConcentrationCastingFix + ", chargedSpell="+chargedSpell+", castingType="+spellCastingType+", spellTarget="+spellTarget+", ReleaseMode="+chargedReleaseMode)
 		Spell spellToCast = chargedSpell
 		If spellToCast != None && spellCastingType == CASTINGTYPE_CONCENTRATION
-			If !Input.IsKeyPressed(keyCodeInterruptCast)
+			If !Input.IsKeyPressed(keyCodeInterruptCast) && chargedReleaseMode != RELEASEMODE_MANUAL && isCharged
+				;Log("Charged["+chargedState+"]: OnUpdate() keyCodeInterruptCast != 0 AND Not Pressed AND ReleaseMode != MANUAL. Go to Normal")
 				GoToState("Normal")
 				return
 			EndIf
 
-			bool attackBound = spellIsHostile || spellTarget != 0
+			bool attackBound = spellIsHostile ;|| spellTarget != 0
 			If attackBound && chargedReleaseMode != RELEASEMODE_MANUAL
 				Debug.SendAnimationEvent(PlayerRef, "attackStart")
+			EndIf
+
+			If !attackBound && !PlayerRef.GetAnimationVariableBool("IsBlocking") && isCharged
+				;Log("Charged["+chargedState+"]: OnUpdate() Not Blocking. Go to Normal")
+				GoToState("Normal")
+				return
 			EndIf
 
 			;Log("Charged: OnUpdate() -> RegisterForSingleUpdate")
 			RegisterForSingleUpdate(0.25)
 
-			If Config.ConcentrationCastingFix && !attackBound
+			If ConcentrationCastingFix && !attackBound
 				If !safetyEnabled
 					safetyEnabled = true
 					;Log("Charged: OnUpdate() Safety Initiated.. State = " + GetState())
@@ -1365,40 +1105,38 @@ State Charged
 	EndEvent
 
 	Event OnEndState()
+		isCharged = false
 		;Log("Charged["+chargedState+"]: OnEndState(), concentrationInstanceId = " + concentrationInstanceId)
+
+		If chargedState == -1
+			return
+		EndIf
+
 		isBusy = true
 
 		ModSpellsDuration.Revert()
 		ModSpellsMagnitude.Revert()
 
 		float timeout = 1.0
-		While timeout > 0.0 && chargedState < 2
+		While timeout > 0.0 && (chargedState != 2 && chargedState != 4)
 			Utility.Wait(0.05)
 			timeout -= 0.05
 		EndWhile
 
-		If chargedState < 2
-			Log("Charged: OnEndState() finalizing while chargedState < 2, this could be an issue...", LogSeverity_Debug)
+		If chargedState != 2 && chargedState != 4
+			Log("Charged: OnEndState() finalizing while chargedState="+chargedState+", this could be an issue...", LogSeverity_Debug)
 		EndIf
 
-		chargedState = 3
-
-		If concentrationInstanceId != 0
-			Sound.StopInstance(concentrationInstanceId)
-			concentrationInstanceId = 0
-		EndIf
-
-		If readyInstanceId != 0
-			Sound.StopInstance(readyInstanceId)
-			readyInstanceId = 0
-		EndIf
-
-		If chargedShader != None
-			chargedShader.Stop(PlayerRef)
-		EndIf
+		chargedState *= 2
 
 		If isBlocking
-			Debug.SendAnimationEvent(PlayerRef, "blockStop")
+			float bTimeout = 1.0
+			While PlayerRef.GetAnimationVariableBool("IsBlocking") && bTimeout > 0
+				Debug.SendAnimationEvent(PlayerRef, "blockStop")
+				Utility.Wait(0.1)
+				bTimeout -= 0.1
+			EndWhile
+			
 			isBlocking = false
 		EndIf
 
@@ -1413,6 +1151,20 @@ State Charged
 			PlayerRef.InterruptCast()
 		EndIf
 
+		If readyInstanceId != 0
+			Sound.StopInstance(readyInstanceId)
+			readyInstanceId = 0
+		EndIf
+
+		If chargedShader != None
+			chargedShader.Stop(PlayerRef)
+		EndIf
+
+		If concentrationInstanceId != 0
+			Sound.StopInstance(concentrationInstanceId)
+			concentrationInstanceId = 0
+		EndIf
+
 		safetyEnabled = false
 		chargedSpell = None
 		keyCodeInterruptCast = -1
@@ -1421,228 +1173,12 @@ State Charged
 	EndEvent
 EndState
 
-;/  ----
-	State: BLOCKING
-/;
 
-bool isBlocking
-bool continousCasting
-bool emptyDefensiveQueue
-bool allowDefensiveHotCasting
-Spell queuedDefensiveSpell
-int queuedDefensiveCastingType
-State Blocking
-	Event OnBeginState()
-		Log("Blocking: OnBeginState()")
-
-		isBlocking = true
-		; emptyDefensiveQueue = false
-		; continousCasting = Config.EnableContinousCasting
-
-		;OnUpdate()	
-	EndEvent
-
-	Event OnUpdate()
-		If isBlocking
-			; If queuedDefensiveSpell == None
-			; 	int queueSize = StorageUtil.FormListCount(self, DefensiveQueueName)
-			; 	;Log("Defensive Queue Size = " + queueSize)
-
-			; 	int spellIndex = 0
-			; 	; If keyCodeInterruptCast != -1
-			; 	; 	spellIndex = GetSpellIndex(keyCodeInterruptCast, DefensiveQueueName)
-			; 	; EndIf
-
-			; 	queuedDefensiveSpell = StorageUtil.FormListPluck(self, DefensiveQueueName, spellIndex, None) as Spell
-			; 	queuedDefensiveCastingType = StorageUtil.IntListPluck(self, DefensiveQueueName + "_Type", spellIndex, -1)
-
-			; 	;Log("Queue Spell = " + queuedDefensiveSpell + ", casting type = " + queuedDefensiveCastingType)
-			; ElseIf keyCodeInterruptCast != -1 && inputRegistrationTime > 0
-			; 	StorageUtil.FloatListAdd(self, AutoCastLatencyName, Utility.GetCurrentRealTime()-inputRegistrationTime)
-			; 	inputRegistrationTime = 0
-			; EndIf
-
-			If queuedDefensiveSpell != None
-				queuedDefensiveSpell.Cast(PlayerRef)
-				; If keyCodeInterruptCast != -1 && queuedOffensiveCastingType == CASTINGTYPE_CONCENTRATION
-				; 	safetySpell = queuedDefensiveSpell
-				; EndIf
-				; queuedDefensiveSpell = None
-				; If queuedDefensiveCastingType != CASTINGTYPE_CONCENTRATION && continousCasting
-				; 	RegisterForSingleUpdate(Config.ContinousCastingCooldown)
-				; EndIf
-				If queuedDefensiveCastingType == CASTINGTYPE_CONCENTRATION
-					RegisterForSingleUpdate(0.1)
-				Else
-					queuedDefensiveSpell = None
-				EndIf
-			; Else
-			; 	emptyDefensiveQueue = true
-			EndIf
-
-			; If safetySpell
-			; 	BruteForceCast()
-			; EndIf
-
-			; Utility.Wait(0.1)
-
-			; If keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast)
-			; 	;Log("Not holding key code ("+keyCodeInterruptCast+"), interrupting block..")
-			; 	Debug.SendAnimationEvent(PlayerRef, "blockStop")
-
-			; 	GoToState("Normal")
-			; EndIf
-		EndIf
-	EndEvent
-
-	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
-		If asEventName == "blockStop"
-			GoToState("Normal")
-		EndIf
-	EndEvent
-
-	Event OnKeyDown(int keyCode)
-		If queuedDefensiveSpell == None; emptyDefensiveQueue && allowDefensiveHotCasting
-			Spell hotSpell = GetSpellByKey(keyCode, false)
-			If hotSpell != None
-				int effectIndex = hotSpell.GetCostliestEffectIndex()
-				MagicEffect m = hotSpell.GetNthEffectMagicEffect(effectIndex)
-				int castingType = m.GetCastingType()
-				; If castingType == CASTINGTYPE_CONCENTRATION
-				; 	emptyDefensiveQueue = false
-				; EndIf
-
-				queuedDefensiveSpell = hotSpell
-				queuedDefensiveCastingType = castingType
-
-				float effectiveCost = hotSpell.GetEffectiveMagickaCost(PlayerRef)
-				If effectiveCost <= PlayerRef.GetActorValue("Magicka")
-					PlayerRef.DamageActorValue("Magicka", effectiveCost)
-					;hotSpell.Cast(PlayerRef)
-				EndIf
-				OnUpdate()
-			EndIf
-		EndIf
-	EndEvent
-
-	Event OnKeyUp(int keyCode, float holdTime)
-		If keyCode == keyCodeInterruptCast
-			GoToState("Normal")
-		EndIf
-	EndEvent
-
-	Event OnEndState()
-		;Log("Blocking:OnEndState()")
-		isBlocking = false
-		keyCodeInterruptCast = -1
-		PlayerRef.InterruptCast()
-		queuedDefensiveSpell = None
-
-		; While PlayerRef.GetAnimationVariableBool("IsBlocking")
-		; 	Debug.SendAnimationEvent(PlayerRef, "blockStop")
-		; EndWhile
-	EndEvent
-EndState
-
-
-;/  ----
-	State: ATTACKING
-/;
-
-Spell queuedOffensiveSpell
-int queuedOffensiveCastingType
-bool emptyOffensiveQueue
-bool isAttacking
-State Attacking
-	Event OnBeginState()
-		Log("Attacking: OnBeginState()")
-		isAttacking = true
-		; If queuedOffensiveSpell == None ;|| keyCodeInterruptCast != -1
-		; 	int queueSize = StorageUtil.FormListCount(self, OffensiveQueueName)
-		; 	;Log("Offensive Queue Size = " + queueSize)
-
-		; 	queuedOffensiveSpell = StorageUtil.FormListShift(self, OffensiveQueueName) as Spell
-		; 	queuedOffensiveCastingType = StorageUtil.IntListShift(self, OffensiveQueueName + "_Type")
-
-		; 	; If queuedOffensiveCastingType == CASTINGTYPE_CONCENTRATION && concentrationToggle
-		; 	; 	int newQueueIndex = StorageUtil.FormListAdd(self, OffensiveQueueName, queuedOffensiveSpell, false)
-		; 	; 	StorageUtil.IntListAdd(self, OffensiveQueueName + "_Type", queuedOffensiveCastingType)
-		; 	; 	Log("(Concentration Toggle) Added concentration spell back onto queue @ " + newQueueIndex)
-		; 	; EndIf
-		; ElseIf keyCodeInterruptCast != -1 && inputRegistrationTime > 0
-		; 	StorageUtil.FloatListAdd(self, AutoCastLatencyName, Utility.GetCurrentRealTime()-inputRegistrationTime)
-		; 	inputRegistrationTime = 0
-		; EndIf
-
-		;Log("Queue Spell = " + queuedOffensiveSpell)
-
-		; If queuedOffensiveSpell == None
-		; 	emptyOffensiveQueue = true
-		; EndIf
-	EndEvent
-	
-	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
-		If asEventName == "HitFrame" && queuedOffensiveSpell != None
-			; If keyCodeInterruptCast != -1 && queuedOffensiveCastingType == CASTINGTYPE_CONCENTRATION
-			; 	safetySpell = queuedOffensiveSpell
-			; EndIf
-
-			;If !isCasting
-				queuedOffensiveSpell.Cast(PlayerRef)
-				If queuedOffensiveCastingType != CASTINGTYPE_CONCENTRATION
-					queuedOffensiveSpell = None
-				EndIf
-				;Log("Cast Offensive")
-			;EndIf
-
-			; If safetySpell
-			; 	BruteForceCast()
-			; EndIf
-		ElseIf asEventName == "attackStop"
-			GoToState("Normal")
-		; ElseIf queuedOffensiveSpell == None && !emptyOffensiveQueue && (asEventName == "weaponLeftSwing" || asEventName == "weaponSwing")
-		; 	queuedOffensiveSpell = StorageUtil.FormListShift(self, OffensiveQueueName) as Spell
-		; 	queuedOffensiveCastingType = StorageUtil.IntListShift(self, OffensiveQueueName + "_Type")
-		; 	If queuedOffensiveSpell == None
-		; 		emptyOffensiveQueue = true
-		; 	EndIf
-		ElseIf asEventName == "blockStartOut"
-			GoToState("Blocking")
-		EndIf
-
-		; If (asEventName == "weaponLeftSwing" && !bLeftHandAttack) || (asEventName == "weaponSwing" && bLeftHandAttack)
-		; 	bLeftHandAttack = !bLeftHandAttack
-		; 	queuedSpell = GetPreparedSpell(bLeftHandAttack, bAllowRotation, false)
-		; EndIf
-
-		;Log("["+asEventName+"] bAllowRotation="+bAllowRotation+", isBashing="+isBashing+", bLeftHandAttack="+bLeftHandAttack)
-	EndEvent
-
-	Event OnEndState()
-		isAttacking = false
-		; queuedOffensiveSpell = None
-		; queuedOffensiveCastingType = -1
-
-		;Log("Attacking: OnEndState()")
-
-		queuedOffensiveSpell = None
-		If queuedOffensiveCastingType == CASTINGTYPE_CONCENTRATION
-			PlayerRef.InterruptCast()
-		EndIf
-
-		; If keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast)
-		; 	keyCodeInterruptCast = -1
-		; 	PlayerRef.InterruptCast()
-		; ElseIf keyCodeInterruptCast == -1
-		; 	PlayerRef.InterruptCast()
-		; EndIf
-		
-		; emptyOffensiveQueue = false
-	EndEvent
-EndState
 
 State Disabled
 EndState
+
+; Dummy functions.
 
 bool Function PrepareSpellForCasting(bool isOffensive, Spell spellToCast, int spellToCastType)
 	 return false

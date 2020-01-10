@@ -180,10 +180,6 @@ State Binding
 		EndIf
 	EndEvent
 
-	; Event OnObjectUnEquipped(Form akBaseObject, ObjectReference akReference)
-	; 	Main.Log("OnObjectUnEquipped = " + akBaseObject.GetName() + ", " + akBaseObject.GetType() + " - akReference="+akReference)
-	; EndEvent
-
 	; Event OnMenuClose(string menuName)
 	; 	Main.Log("Binding:OnMenuClose()")
 	; 	If menuName == "MagicMenu"
@@ -232,10 +228,18 @@ Event OnAnimationEvent(ObjectReference akSource, string asEventName)
 	; EndIf
 EndEvent
 
-; Event OnObjectEquipped(Form akBaseObject, ObjectReference akReference)
-; 	Main.Log("OnObjectEquipped = " + akBaseObject.GetName() + ", " + akBaseObject.GetType() + " - akReference="+akReference)
-; EndEvent
+Event OnObjectUnEquipped(Form akBaseObject, ObjectReference akReference)
+	;Main.Log("OnObjectUnEquipped = " + akBaseObject.GetName() + ", " + akBaseObject.GetType() + " - akReference="+akReference)
+	Weapon w = akBaseObject as Weapon
+	If w != None
+		Main.OnWeaponUnequipped(w)
+	EndIf
+EndEvent
 
-; Event OnObjectUnequipped(Form akBaseObject, ObjectReference akReference)
-; 	Main.Log("OnObjectUnequipped = " + akBaseObject.GetName() + ", " + akBaseObject.GetType())
-; EndEvent
+Event OnObjectEquipped(Form akBaseObject, ObjectReference akReference)
+	;Main.Log("OnObjectEquipped = " + akBaseObject.GetName() + ", " + akBaseObject.GetType() + " - akReference="+akReference)
+	Weapon w = akBaseObject as Weapon
+	If w != None
+		Main.OnWeaponEquipped(w)
+	EndIf
+EndEvent

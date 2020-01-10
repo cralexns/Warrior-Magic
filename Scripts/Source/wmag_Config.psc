@@ -10,7 +10,7 @@ EndProperty
 bool Property IsModStarting Auto Hidden
 
 int Function GetVersion()
-	return 7
+	return 8
 EndFunction
 
 ;; REMOVE THESE
@@ -23,11 +23,6 @@ EndFunction
  ;bool Property AutoReleaseSpell = true Auto
 ;bool Property AllowStackingSpells = false Auto ;Allow stacking offensive concentration spells by bashing
 ;---
-
-;; Spell Charging Settings
-int Property SPELLCHARGE_NONE = 0 Auto Hidden ;No spell charging - everything charges instantly.
-int Property SPELLCHARGE_SPELLBASED = 1 Auto Hidden ;Spell charge time is based on the cast time of the spell.
-int Property SPELLCHARGE_MAXMAGIC = 2 Auto Hidden ;Spell charge time is based on the amount of magicka required versus magicka pool
 
 ; int Property SpellChargeMode = 2 Auto
 ; float Property MinimumChargeTime = 0.5 Auto
@@ -49,9 +44,7 @@ int Property SPELLCHARGE_MAXMAGIC = 2 Auto Hidden ;Spell charge time is based on
 ; ---
 
 bool Property EnableJumpAttackHack = true Auto
-bool Property ConcentrationCastingFix = false Auto
 bool Property EnableSweepingAttacks = true Auto
-bool Property DisableChargeAnimation = true Auto
 
 ;; Spell Cost Settings
 ; int Property SPELLCOST_NONE = 0 Auto Hidden ;No cost for spells.
@@ -120,16 +113,24 @@ Event OnConfigInit()
 	Main.Log("OnConfigInit() - Exit")
 EndEvent
 
+bool mcmOpen
 Event OnConfigOpen()
 	RegisterForModEvent("WMAG_ENABLE", "OnWMAGEnable")
 	RegisterForModEvent("WMAG_BuildSpellCache", "OnBuildSpellCache")
+	mcmOpen = true
 EndEvent
 
 Event OnConfigClose()
 	learnedSpellsCached = false
 	UnregisterForAllModEvents()
 	Main.Reset()
+
+	mcmOpen = false
 EndEvent
+
+Function ResetSpellsCache()
+	lastLearnedSpell = None
+EndFunction
 
 ;/ Event OnConfigRegister()
 	Main.Log("MCM Registered", Main.LogLevel_Notification)
@@ -137,7 +138,13 @@ EndEvent /;
 
 Event OnVersionUpdate(int version)
 	Main.Log("version="+version+", CurrentVersion="+CurrentVersion)
-	If version > CurrentVersion && CurrentVersion > 0
+	If version == 8 && CurrentVersion == 7
+		; Reinstall..
+		Main.Log("Updating to new version..", Main.LogSeverity_Warning)
+		Main.Stop()
+		Utility.WaitMenuMode(0.5)
+		Main.Start()
+	ElseIf version > CurrentVersion && CurrentVersion > 0
 		OnConfigInit()
 	EndIf
 EndEvent
@@ -145,29 +152,16 @@ EndEvent
 int totalSpells
 int processedSpells
 Spell lastLearnedSpell
-bool updatingSpellCache
-Form[] Function GetLearnedSpells(Actor akActor, bool forceUpdate = false)
-	If updatingSpellCache
-		Main.Log("Aborting GetLearnedSpells(), spell cache update in progress.. ("+processedSpells+"/"+totalSpells+")", Main.LogSeverity_Error)
-		return PapyrusUtil.FormArray(0)
-	EndIf
-	updatingSpellCache = true
-
+Form[] Function GetLearnedSpells(Actor akActor)
 	ActorBase basePlayer = akActor.GetActorBase()
 
 	int numRefSpells = akActor.GetSpellCount()
 	int numBaseSpells = basePlayer.GetSpellCount()
-	; If learnedSpellCache != None && numRefSpells+numBaseSpells == totalSpells
-	; 	Main.Log("Skipping cache refresh, player total spell count is the same.")
-	; 	return learnedSpellCache
-	; EndIf
-	;Form[] mappedSpells = Main.GetAllMappedSpells()
 
-	If lastLearnedSpell != None && !forceUpdate
+	If learnedSpellCache.length > 0 && lastLearnedSpell != None
 		Spell currentLastLearnedSpell = akActor.GetNthSpell(numRefSpells - 1)
-		If lastLearnedSpell == currentLastLearnedSpell
-			Main.Log("Skipping cache refresh, last learned spell is the same as last time.")
-			updatingSpellCache = false
+		If lastLearnedSpell == currentLastLearnedSpell && numRefSpells+numBaseSpells == totalSpells
+			Main.Log("Skipping cache refresh, spell count and last learned spell is the same as last time.")
 			return learnedSpellCache
 		EndIf
 	EndIf
@@ -179,41 +173,28 @@ Form[] Function GetLearnedSpells(Actor akActor, bool forceUpdate = false)
 	int idx = 0
 	bool peInstalled = Main.PapyrusExtenderInstalled
 
+	Spell spellToCheck = None
 	While idx < numBaseSpells + numRefSpells
 		If idx < numBaseSpells
-			Spell baseSpell = basePlayer.GetNthSpell(idx)
-			If IsSpell(baseSpell, akActor)
-				learnedSpells[spellCount] = baseSpell
-				spellCount += 1
-			EndIf
+			spellToCheck = basePlayer.GetNthSpell(idx)
+		Else
+			spellToCheck = akActor.GetNthSpell(idx - numBaseSpells)
 		EndIf
-		If idx < numRefSpells
-			Spell refSpell = akActor.GetNthSpell(idx)
-			If IsSpell(refSpell, akActor)
-				learnedSpells[spellCount] = refSpell
-				spellCount += 1
-			EndIf
+
+		If (peInstalled && PO3_SKSEFunctions.GetSpellType(spellToCheck) != 0) || spellToCheck.GetMagickaCost() <= 0 || spellToCheck.GetNthEffectMagicEffect(spellToCheck.GetCostliestEffectIndex()).IsEffectFlagSet(0x00008000)
+			; continue
+		Else
+			learnedSpells[spellCount] = spellToCheck
+			spellCount += 1
 		EndIf
 
 		idx += 1
 		processedSpells = idx
 	EndWhile
 
-	lastLearnedSpell = learnedSpells[learnedSpells.length - 1] as Spell
-	updatingSpellCache = false
+	lastLearnedSpell = spellToCheck
 
 	return PapyrusUtil.SliceFormArray(learnedSpells, 0, spellCount - 1)
-EndFunction
-
-bool Function IsSpell(Spell aSpell, Actor akActor)
-	If aSpell.GetMagickaCost() <= 0
-		return False 
-	ElseIf Main.PapyrusExtenderInstalled && PO3_SKSEFunctions.GetSpellType(aSpell) != 0
-		return False
-	ElseIf aSpell.GetNthEffectMagicEffect(aSpell.GetCostliestEffectIndex()).IsEffectFlagSet(0x00008000)
-		return False
-	EndIf
-	return true
 EndFunction
 
 Event OnWMAGEnable(string eventName, string strArg, float numArg, Form sender)
@@ -224,19 +205,34 @@ EndEvent
 
 
 bool learnedSpellsCached
+bool updatingSpellCache
 Form[] learnedSpellCache
 Event OnBuildSpellCache(string eventName, string strArg, float numArg, Form sender)
 	Main.Log("OnBuildSpellCache()")
 
-	If !learnedSpellsCached
-		Main.Log("Populating spell cache...")
+	If !learnedSpellsCached && !updatingSpellCache
+		updatingSpellCache = true
+		Main.Log("Populating spell cache...", Main.LogLevel_Notification)
+
 		Utility.WaitMenuMode(0.5)
+
+		If forceRefreshCacheId != 0
+			SetOptionFlags(forceRefreshCacheId, IsOptionDisabled(true), true)
+			SetTextOptionValue(forceRefreshCacheId, "Refreshing spell cache...")
+		EndIf
+
 		Form[] spellCache = GetLearnedSpells(Main.PlayerRef)
 		If spellCache.length > 0
+			If forceRefreshCacheId != 0
+				SetTextOptionValue(forceRefreshCacheId, "Spell cache refreshed!")
+			EndIf
+
 			learnedSpellCache = spellCache
 			learnedSpellsCached = true
 		EndIf
-		Main.Log("Finished populating spell cache.")
+
+		Main.Log("Finished populating spell cache.", Main.LogLevel_Notification)
+		updatingSpellCache = false
 	EndIf
 EndEvent
 
@@ -269,8 +265,8 @@ Event OnPageReset(string page)
 		AddTextOptionST("LatencyQueueText", "Latency (CD)", (averageQueue * 1000) as int+" ms")
 
 		SetCursorPosition(4)
-		AddToggleOptionST("DisableChargeAnimationToggle", "Disable Charge Animation", DisableChargeAnimation)
-		AddToggleOptionST("ConcentrationCastingFixToggle", "Concentration Casting Fix", ConcentrationCastingFix)
+		AddToggleOptionST("DisableChargeAnimationToggle", "Disable Charge Animation", Main.DisableChargeAnimation)
+		AddToggleOptionST("ConcentrationCastingFixToggle", "Concentration Casting Fix", Main.ConcentrationCastingFix)
 		AddSliderOptionST("MaximumDurationModSlider", "Duration Extension Max", Main.MaximumDurationModifier, timesFormat)
 		AddKeyMapOptionST("DispelKeyModifierKeyMap", "Dispel Key Modifier", Main.DispelKeyModifier)
 
@@ -281,15 +277,15 @@ Event OnPageReset(string page)
 		SetCursorPosition(14)
 		AddHeaderOption("Offensive Casting", IsOptionDisabled(true))
 		AddMenuOptionST("SpellChargeModeMenuO", "Charge Mode", chargeModes[Main.SpellChargeMode[1]])
-		AddSliderOptionST("MinimumChargeTimeSliderO", "Min. Charge Time", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == SPELLCHARGE_NONE))
-		AddSliderOptionST("MaximumChargeTimeSliderO", "Max. Charge Time", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == SPELLCHARGE_NONE))
+		AddSliderOptionST("MinimumChargeTimeSliderO", "Min. Charge Time", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == Main.SPELLCHARGE_NONE))
+		AddSliderOptionST("MaximumChargeTimeSliderO", "Max. Charge Time", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] == Main.SPELLCHARGE_NONE))
 		AddMenuOptionST("SpellReleaseModeO", "Release Mode", releaseModes[Main.SpellReleaseMode[1]])
 
 		SetCursorPosition(15)
 		AddHeaderOption("Defensive Casting", IsOptionDisabled(true))
 		AddMenuOptionST("SpellChargeModeMenuD", "Charge Mode", chargeModes[Main.SpellChargeMode[0]])
-		AddSliderOptionST("MinimumChargeTimeSliderD", "Min. Charge Time", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == SPELLCHARGE_NONE))
-		AddSliderOptionST("MaximumChargeTimeSliderD", "Max. Charge Time", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == SPELLCHARGE_NONE))
+		AddSliderOptionST("MinimumChargeTimeSliderD", "Min. Charge Time", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == Main.SPELLCHARGE_NONE))
+		AddSliderOptionST("MaximumChargeTimeSliderD", "Max. Charge Time", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] == Main.SPELLCHARGE_NONE))
 		AddMenuOptionST("SpellReleaseModeD", "Release Mode", releaseModes[Main.SpellReleaseMode[0]])
 
 
@@ -300,85 +296,6 @@ Event OnPageReset(string page)
 
 	Main.Log("OnPageReset("+page+") - Exit")
 EndEvent
-
-; string[] ruleSlotNames
-; int[] ruleSlotChargeOptionId
-; int[] ruleSlotReleaseOptionId
-; int[] ruleSlotChannelOptionId
-; int[] ruleSlotRemoveId
-
-; bool createRuleIsHostile
-; int createRuleCastingType
-; int createRuleCastingTarget
-; Function BuildRules()
-; 	ruleSlotChargeOptionId = Utility.CreateIntArray(10, -1)
-; 	ruleSlotReleaseOptionId = Utility.CreateIntArray(10, -1)
-; 	ruleSlotChannelOptionId = Utility.CreateIntArray(10, -1)
-; 	ruleSlotRemoveId = Utility.CreateIntArray(10, -1)
-
-; 	SetCursorFillMode(LEFT_TO_RIGHT)
-
-; 	int idx = 0
-; 	While idx < ruleSlotNames.Length
-; 		string[] qualifiers = PapyrusUtil.StringSplit(ruleSlotNames[idx], ":")
-; 		Main.Log(PapyrusUtil.StringJoin(qualifiers))
-
-; 		bool isHostile = qualifiers[0] as int
-; 		int castingType = qualifiers[1] as int
-; 		int castingTarget = qualifiers[2] as int
-
-; 		string name = GetNameForRule(isHostile, castingType, castingTarget)
-; 		string ruleIdentifier = "WMAG_RULE_"+ruleSlotNames[idx]
-; 		int chargeMode = StorageUtil.GetIntValue(Main, ruleIdentifier+"_CHARGE", 0)
-; 		int releaseMode = StorageUtil.GetIntValue(Main, ruleIdentifier+"_RELEASE", 0)
-; 		AddHeaderOption("Rule: " + name)
-; 		AddEmptyOption()
-; 		ruleSlotChargeOptionId[idx] = AddMenuOption("Charge", chargeModes[chargeMode])
-; 		ruleSlotReleaseOptionId[idx] = AddMenuOption("Release", releaseModes[releaseMode])
-
-; 		idx += 1
-; 	EndWhile
-
-; 	SetCursorFillMode(TOP_TO_BOTTOM)
-
-; 	createRuleIsHostile = False
-; 	createRuleCastingType = -1
-; 	createRuleCastingTarget = -1
-
-;     AddEmptyOption()
-; 	AddHeaderOption("Custom Casting Rule")
-; 	AddToggleOptionST("CreateRuleIsHostile", "Hostile", false)
-; 	AddMenuOptionST("CreateRuleCastingType", "Type", "")
-; 	AddMenuOptionST("CreateRuleCastingTarget", "Target", "")
-; 	AddTextOptionST("CreateRule", "", "[Create Rule]")
-; EndFunction
-
-; string Function GetNameForRule(bool isHostile, int type, int target)
-; 	string name = ""
-; 	If isHostile
-; 		name += "Hostile"
-; 	Else
-; 		name += "Friendly"
-; 	EndIf
-
-; 	name += " " + castingTypes[type] + " " + targetTypes[target]
-
-; 	return name
-; EndFunction
-
-; bool Function CreateNewRule()
-; 	Main.Log("CreateNewRule, castingType="+createRuleCastingType+", castingTarget="+createRuleCastingTarget)
-; 	If createRuleCastingType != -1 && createRuleCastingTarget != -1 && ruleSlotNames.Length < 10
-; 		string newRule = (createRuleIsHostile as int) + ":" + createRuleCastingType + ":" + createRuleCastingTarget
-; 		If ruleSlotNames.Find(newRule) == -1
-; 			ruleSlotNames = PapyrusUtil.PushString(ruleSlotNames, newRule)
-; 			StorageUtil.SetIntValue(Main, "WMAG_RULE_"+newRule+"_CHARGE", 0)
-; 			StorageUtil.SetIntValue(Main, "WMAG_RULE_"+newRule+"_RELEASE", 0)
-; 			return true
-; 		EndIf
-; 	EndIf
-; 	return false
-; EndFunction
 
 int[] spellSlotIndex
 int[] spellSlotSpellIndex
@@ -448,17 +365,6 @@ Function BuildSpellsPage()
 			EndIf
 			idx += 1
 		EndWhile
-
-		; int slotIdx = 0
-		; While slotIdx < spellSlots
-		; 	int keyCode = StorageUtil.IntListGet(Main, Main.KeyBindingIndexName, slotIdx)
-		; 	Spell s = StorageUtil.FormListGet(Main, Main.KeyBindingIndexName, slotIdx) as Spell
-		; 	If keyCode > 0 && s
-		; 		spellSlotsKeyIndex[slotIdx] = AddKeyMapOption("KEY", keyCode)
-		; 		spellSlotsSpellIndex[slotIdx] = AddMenuOption("SPELL", s.GetName())
-		; 	EndIf
-		; 	slotIdx += 1
-		; EndWhile
 	EndIf
 
 	AddEmptyOption()
@@ -471,10 +377,10 @@ Function BuildSpellsPage()
 	enableOverride = false
 	AddToggleOptionST("EnableOverride", "Enable Override", enableOverride)
 
-	;SetCursorFillMode(LEFT_TO_RIGHT)
+	SetCursorFillMode(LEFT_TO_RIGHT)
 	spellSlotCreateIndex = AddKeyMapOption("Click to bind key", -1)
 	
-	;forceRefreshCacheId = AddTextOption("", "[Force refresh spell cache]")
+	forceRefreshCacheId = AddTextOption("", "[Refresh spell cache]")
 EndFunction
 
 int Function IsOptionDisabled(bool disabled = true)
@@ -549,8 +455,15 @@ Spell Function FindFirstUnmappedSpell(int keyCode)
 		idx += 1
 	EndWhile
 
+	Spell default = learnedSpellCache[0] as Spell
+
+	If default == None
+		Main.Log("Failed to find unmapped or learned spell (maybe cache is still processing?), defaulting to Flames (0x00012FCD)", Main.LogSeverity_Warning)
+		return Game.GetForm(0x00012FCD) as Spell
+	EndIf
+
 	Main.Log("Didn't find unmapped spell, returning first available learned spell..")
-	return learnedSpellCache[0] as Spell
+	return default
 EndFunction
 
 Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, string conflictName)
@@ -558,23 +471,28 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 		Return
 	EndIf
 
+	; If updatingSpellCache
+	; 	ShowMessage("Warrior Magic is updating the spell cache, please wait before creating any keybindings..")
+	; 	return
+	; EndIf
+
 	int displayIndex = spellSlotKeyOptionId.Find(option)
 	If option == spellSlotCreateIndex && keyCode != -1
 		Spell defaultSpell = FindFirstUnmappedSpell(keyCode)
 		If defaultSpell
 			Main.BindSpellToKey(keyCode, defaultSpell)
+
+			If enableOverride && StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
+				StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
+				StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
+			EndIf
+
 			ForcePageReset()
 		EndIf
-		If enableOverride && StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
-			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
-			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
-		EndIf
+		
 	ElseIf displayIndex != -1
 		int slotIndex = spellSlotIndex[displayIndex]
 		int currentKeyCode = Main.GetKeyCodeByIndex(slotIndex)
-
-		; Spell currentSpell = Main.GetSpellByIndex(slotIndex)
-		; Spell otherSpell = Main.GetSpellByKey(keyCode)
 
 		int existingIndex = Main.GetIndexByKeyCode(keyCode)
 		If existingIndex != -1 && !Main.SetKeyByIndex(existingIndex, currentKeyCode)
@@ -589,21 +507,22 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 		EndIf
 
 		ForcePageReset()
-		; If currentKeyCode > -1 && currentSpell && Main.UnbindKey(currentKeyCode)
-		; 	If Main.BindSpellToKey(keyCode, currentSpell)
-		; 		If otherSpell
-		; 			Main.BindSpellToKey(currentKeyCode, otherSpell)
-		; 		EndIf
-		; 		ForcePageReset()
-		; 	EndIf
-		; EndIf
 	EndIf
 EndEvent
 
 Event OnOptionSelect(int option)
 	If option == forceRefreshCacheId
-		learnedSpellsCached = false
-		SendModEvent("WMAG_BuildSpellCache")
+		If updatingSpellCache
+			ShowMessage("Currently in the process of updating spell cache, please wait..")
+			return
+		EndIf
+
+		If ShowMessage("If you've recently learned some new spells and they're not showing up you can try refreshing the spell cache, depending on the amount of spells your character knows. This operation can take upwards of 30 seconds to complete.", true, "Refresh", "Abort")
+			lastLearnedSpell = None
+			learnedSpellsCached = false
+			learnedSpellCache = PapyrusUtil.FormArray(0)
+			ForcePageReset()
+		EndIf
 	EndIf
 EndEvent
 
@@ -614,9 +533,10 @@ Event OnOptionMenuOpen(int option)
 		spellMenuDisplayIndex = spellSlotSpellOptionId.Find(option)
 		If spellMenuDisplayIndex >= 0
 
-			float timeout = 10
+			float timeout = 30
 			float interval = 0.1
-			While timeout > 0 && !learnedSpellsCached ; - (totalSpells * 0.3)
+			SetOptionFlags(option, IsOptionDisabled(true))
+			While timeout > 0 && !learnedSpellsCached && mcmOpen ; - (totalSpells * 0.3)
 				; If timeout as int % 2 == 0
 				; 	SetMenuOptionValue(option, ". Loading ("+processedSpells+"/"+totalSpells+")")
 				; Else
@@ -629,9 +549,12 @@ Event OnOptionMenuOpen(int option)
 
 			If !learnedSpellsCached
 				ShowMessage("Loading spells timed out.. If you have a lot of spells, abilities etc. it can take a while to filter, wait a little and try again.", false)
+			Else
+				SetMenuOptionValue(option, "Updating menu..")
 			EndIf
 
 			LoadSpellsInSpellMenu(spellMenuDisplayIndex)
+			SetOptionFlags(option, IsOptionDisabled(false))
 			return
 		EndIf
 
@@ -729,7 +652,7 @@ Event OnOptionDefault(int option)
 EndEvent
 
 Function LoadSpellsInSpellMenu(int displayIndex)
-	If learnedSpellCache
+	If learnedSpellsCached
 		int slotIndex = spellSlotIndex[displayIndex]
 		int spellIndex = spellSlotSpellIndex[displayIndex]
 		Spell selectedSpell = Main.GetSpellByIndex(slotIndex, spellIndex)
@@ -757,17 +680,17 @@ Event OnOptionMenuAccept(int option, int index)
 	Main.Log("OnOptionMenuAccept(), page = " + CurrentPage + ", option="+option+", index="+index)
 	If CurrentPage == Pages[1]
 		int displayIndex = spellSlotSpellOptionId.Find(option)
-		If displayIndex >= 0
+		If displayIndex >= 0 && index != -1
 			spellMenuDisplayIndex = -1
 			int slotIndex = spellSlotIndex[displayIndex]
 			int spellIndex = spellSlotSpellIndex[displayIndex]
 			int keyCode = Main.GetKeyCodeByIndex(slotIndex)
-			If index == -1
-				If Main.UnbindKey(keyCode, spellIndex)
-					ForcePageReset()
-				EndIf
-				return
-			EndIf
+			; If index == -1
+			; 	If Main.UnbindKey(keyCode, spellIndex)
+			; 		ForcePageReset()
+			; 	EndIf
+			; 	return
+			; EndIf
 
 			Spell selectedSpell = learnedSpellCache[index] as Spell
 			If selectedSpell && selectedSpell != Main.GetSpellByIndex(slotIndex, spellIndex)
@@ -818,7 +741,7 @@ State ToggleMod
 		If IsModStarting
 			SetInfoText("Exit all menus to allow the mod to start.")
 		ElseIf Enabled
-			SetInfoText("Disable all functions of the mod.")
+			SetInfoText("Disable all functions of the mod. Warning, this also reset all casting related settings.")
 		Else
 			SetInfoText("Re-enable all functions of the mod.")
 		EndIf
@@ -868,32 +791,6 @@ State LatencyQueueText
 		SetInfoText("The average time it takes to prepare non-essentials after a spell is charged. Click to reset averages.")
 	EndEvent
 EndState
-
-; State SpellChargeModeMenu
-; 	Event OnMenuOpenST()
-; 		SetMenuDialogStartIndex(SpellChargeMode)
-; 		SetMenuDialogDefaultIndex(0)
-; 		SetMenuDialogOptions(chargeModes)
-; 	EndEvent
-
-; 	Event OnMenuAcceptST(int index)
-; 		SpellChargeMode = index
-; 		SetMenuOptionValueST(chargeModes[index])
-; 		SetOptionFlagsST(IsOptionDisabled(SpellChargeMode == 0), true, "MinimumChargeTimeSlider")
-; 		SetOptionFlagsST(IsOptionDisabled(SpellChargeMode == 0), false, "MaximumChargeTimeSlider")
-; 	EndEvent
-
-; 	Event OnDefaultST()
-; 		SpellChargeMode = 2
-; 		SetMenuOptionValueST(chargeModes[SpellChargeMode])
-; 		SetOptionFlagsST(IsOptionDisabled(SpellChargeMode == 0), true, "MinimumChargeTimeSlider")
-; 		SetOptionFlagsST(IsOptionDisabled(SpellChargeMode == 0), false, "MaximumChargeTimeSlider")
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Set the behaviour of spell queue charging. Instant (1), based on the spell's Cast Time (2) or on the spell's Magicka Cost (3) relative to your maximum magicka.")
-; 	EndEvent
-; EndState
 
 State SpellChargeModeMenuD
 	Event OnMenuOpenST()
@@ -1096,8 +993,8 @@ EndState
 
 State ConcentrationCastingFixToggle
 	Event OnSelectST()
-		ConcentrationCastingFix = !ConcentrationCastingFix
-		SetToggleOptionValueST(ConcentrationCastingFix)
+		Main.ConcentrationCastingFix = !Main.ConcentrationCastingFix
+		SetToggleOptionValueST(Main.ConcentrationCastingFix)
 	EndEvent
 
 	Event OnHighlightST()
@@ -1119,8 +1016,8 @@ EndState
 
 State DisableChargeAnimationToggle
 	Event OnSelectST()
-		DisableChargeAnimation = !DisableChargeAnimation
-		SetToggleOptionValueST(DisableChargeAnimation)
+		Main.DisableChargeAnimation = !Main.DisableChargeAnimation
+		SetToggleOptionValueST(Main.DisableChargeAnimation)
 	EndEvent
 
 	Event OnHighlightST()
@@ -1173,254 +1070,3 @@ State EnableOverride
 		SetInfoText("Enable charge/release override setting for this keybind.")
 	EndEvent
 EndState
-
-; State CreateRuleIsHostile
-; 	Event OnSelectST()
-; 		createRuleIsHostile = !createRuleIsHostile
-; 		SetToggleOptionValueST(createRuleIsHostile)
-
-; 		If CreateNewRule()
-; 			ForcePageReset()
-; 		EndIf
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		;SetInfoText("Enable the ability to attack while jumping. (This is an experimental hack)")
-; 	EndEvent
-; EndState
-
-; State CreateRuleCastingType
-; 	Event OnMenuOpenST()
-; 		SetMenuDialogStartIndex(0)
-; 		SetMenuDialogDefaultIndex(0)
-; 		SetMenuDialogOptions(castingTypes)
-; 	EndEvent
-
-; 	Event OnMenuAcceptST(int index)
-; 		createRuleCastingType = index
-; 		SetMenuOptionValueST(castingTypes[index])
-; 	EndEvent
-
-; 	; Event OnDefaultST()
-; 	; 	Main.SpellReleaseModeOffensive = Main.RELEASEMODE_KEYUP
-; 	; 	SetMenuOptionValueST(releaseModes[Main.SpellReleaseModeOffensive])
-; 	; EndEvent
-
-; 	Event OnHighlightST()
-; 		;SetInfoText("Set the behaviour of spell release after charging: Release on offensive (weapon swing) or defensive (block) action (1), after releasing charge key (2), hostile spells automatically (3), defensive spells automatically (4) or all spells automatically (5)")
-; 	EndEvent
-; EndState
-
-; State CreateRuleCastingTarget
-; 	Event OnMenuOpenST()
-; 		SetMenuDialogStartIndex(0)
-; 		SetMenuDialogDefaultIndex(0)
-; 		SetMenuDialogOptions(targetTypes)
-; 	EndEvent
-
-; 	Event OnMenuAcceptST(int index)
-; 		createRuleCastingTarget = index
-; 		SetMenuOptionValueST(targetTypes[index])
-; 	EndEvent
-
-; 	; Event OnDefaultST()
-; 	; 	Main.SpellReleaseModeOffensive = Main.RELEASEMODE_KEYUP
-; 	; 	SetMenuOptionValueST(releaseModes[Main.SpellReleaseModeOffensive])
-; 	; EndEvent
-
-; 	Event OnHighlightST()
-; 		;SetInfoText("Set the behaviour of spell release after charging: Release on offensive (weapon swing) or defensive (block) action (1), after releasing charge key (2), hostile spells automatically (3), defensive spells automatically (4) or all spells automatically (5)")
-; 	EndEvent
-; EndState
-
-; State CreateRule
-; 	Event OnSelectST()
-; 		If CreateNewRule()
-; 			ForcePageReset()
-; 		EndIf
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		;SetInfoText("Disable charging animation allowing you to move while charging a spell.")
-; 	EndEvent
-; EndState
-
-; State OffensiveQueueSizeSlider
-; 	Event OnSliderOpenST()
-; 		SetSliderDialogStartValue(OffensiveQueueMaxLength)
-; 		SetSliderDialogDefaultValue(1)
-; 		SetSliderDialogRange(1, 10)
-; 		SetSliderDialogInterval(1)
-; 	EndEvent
-
-; 	Event OnSliderAcceptST(float value)
-; 		OffensiveQueueMaxLength = value as int
-; 		SetSliderOptionValueST(OffensiveQueueMaxLength)
-; 	EndEvent
-
-; 	Event OnDefaultST()
-; 		OffensiveQueueMaxLength = 3
-; 		SetSliderOptionValueST(OffensiveQueueMaxLength)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Set the size of the offensive queue, limiting the amount of spells that can be charged before attacking.")
-; 	EndEvent
-; EndState
-
-; State OffensiveAutoCastDisabledToggle
-; 	Event OnSelectST()
-; 		If OffensiveQueueAuto != AUTOCAST_DISABLED
-; 			SetToggleOptionValueST(false)
-; 			OffensiveQueueAuto = AUTOCAST_DISABLED
-; 		Else
-; 			OffensiveQueueAuto = AUTOCAST_INSTANT
-; 			SetToggleOptionValueST(true)
-; 		EndIf
-; 		SetOptionFlagsST(IsOptionDisabled(OffensiveQueueAuto == AUTOCAST_DISABLED), false, "OffensiveAutoCastConcentrationToggle")
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Enable the ability to auto-cast offensive spells (attack) by holding down the associated key while weapons are drawn.")
-; 	EndEvent
-; EndState
-
-; State OffensiveAutoCastConcentrationToggle
-; 	Event OnSelectST()
-; 		If Math.LogicalAnd(OffensiveQueueAuto, AUTOCAST_CONCENTRATION) == AUTOCAST_CONCENTRATION
-; 			OffensiveQueueAuto = Math.LogicalXor(OffensiveQueueAuto, AUTOCAST_CONCENTRATION)
-; 			SetToggleOptionValueST(false)
-; 		Else
-; 			OffensiveQueueAuto = Math.LogicalOr(OffensiveQueueAuto, AUTOCAST_CONCENTRATION)
-; 			SetToggleOptionValueST(true)
-; 		EndIf
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Only auto-cast offensive concentration spells.")
-; 	EndEvent
-; EndState
-
-; State OffensiveConcentrationToggle
-; 	Event OnSelectST()
-; 		OffensiveConcentrationToggle = !OffensiveConcentrationToggle
-; 		SetToggleOptionValueST(OffensiveConcentrationToggle)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Toggle offensive concentration spells.")
-; 	EndEvent
-; EndState
-
-; State OffensiveConcentrationShaderPersistToggle
-; 	Event OnSelectST()
-; 		OffensiveConcentrationShaderPersist = !OffensiveConcentrationShaderPersist
-; 		SetToggleOptionValueST(OffensiveConcentrationShaderPersist)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Toggle persisting shader effect for toggled offensive concentration spells.")
-; 	EndEvent
-; EndState	
-
-; State DefensiveQueueSizeSlider
-; 	Event OnSliderOpenST()
-; 		SetSliderDialogStartValue(DefensiveQueueMaxLength)
-; 		SetSliderDialogDefaultValue(1)
-; 		SetSliderDialogRange(1, 10)
-; 		SetSliderDialogInterval(1)
-; 	EndEvent
-
-; 	Event OnSliderAcceptST(float value)
-; 		DefensiveQueueMaxLength = value as int
-; 		SetSliderOptionValueST(DefensiveQueueMaxLength)
-; 	EndEvent
-
-; 	Event OnDefaultST()
-; 		DefensiveQueueMaxLength = 6
-; 		SetSliderOptionValueST(DefensiveQueueMaxLength)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Set the size of the defensive queue, limiting the amount of spells that can be charged before blocking.")
-; 	EndEvent
-; EndState
-
-; State DefensiveAutoCastDisabledToggle
-; 	Event OnSelectST()
-; 		If DefensiveQueueAuto != AUTOCAST_DISABLED
-; 			SetToggleOptionValueST(false)
-; 			DefensiveQueueAuto = AUTOCAST_DISABLED
-; 		Else
-; 			DefensiveQueueAuto = AUTOCAST_INSTANT
-; 			SetToggleOptionValueST(true)
-; 		EndIf
-; 		SetOptionFlagsST(IsOptionDisabled(DefensiveQueueAuto == AUTOCAST_DISABLED), false, "DefensiveAutoCastConcentrationToggle")
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Enable the ability to auto-cast defensive spells (block) by holding down the associated key while weapons are drawn.")
-; 	EndEvent
-; EndState
-
-; State DefensiveAutoCastConcentrationToggle
-; 	Event OnSelectST()
-; 		If Math.LogicalAnd(DefensiveQueueAuto, AUTOCAST_CONCENTRATION) == AUTOCAST_CONCENTRATION
-; 			DefensiveQueueAuto = Math.LogicalXor(DefensiveQueueAuto, AUTOCAST_CONCENTRATION)
-; 			SetToggleOptionValueST(false)
-; 		Else
-; 			DefensiveQueueAuto = Math.LogicalOr(DefensiveQueueAuto, AUTOCAST_CONCENTRATION)
-; 			SetToggleOptionValueST(true)
-; 		EndIf
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Only auto-cast defensive concentration spells.")
-; 	EndEvent
-; EndState
-
-; State EnableContinousCastingToggle
-; 	Event OnSelectST()
-; 		EnableContinousCasting = !EnableContinousCasting
-; 		SetToggleOptionValueST(EnableContinousCasting)
-; 		SetOptionFlagsST(IsOptionDisabled(!EnableContinousCasting), false, "ContinousCastingCooldownSlider")
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Enable continously casting defensive non-concentration spells while blocking.")
-; 	EndEvent
-; EndState
-
-; State ContinousCastingCooldownSlider
-; 	Event OnSliderOpenST()
-; 		SetSliderDialogStartValue(ContinousCastingCooldown)
-; 		SetSliderDialogDefaultValue(1.0)
-; 		SetSliderDialogRange(0.1, 5)
-; 		SetSliderDialogInterval(0.05)
-; 	EndEvent
-
-; 	Event OnSliderAcceptST(float value)
-; 		ContinousCastingCooldown = value
-; 		SetSliderOptionValueST(ContinousCastingCooldown, secondsFormat)
-; 	EndEvent
-
-; 	Event OnDefaultST()
-; 		ContinousCastingCooldown = 1.0
-; 		SetSliderOptionValueST(ContinousCastingCooldown, secondsFormat)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Set the delay before casting the next spell in the defensive queue when continously casting.")
-; 	EndEvent
-; EndState
-
-; State EnableDefensiveHotCastingToggle
-; 	Event OnSelectST()
-; 		AllowDefensiveHotCasting = !AllowDefensiveHotCasting
-; 		SetToggleOptionValueST(AllowDefensiveHotCasting)
-; 	EndEvent
-
-; 	Event OnHighlightST()
-; 		SetInfoText("Enable instantly casting a defensive spell by clicking assigned hotkey while actively blocking.")
-; 	EndEvent
-; EndState
