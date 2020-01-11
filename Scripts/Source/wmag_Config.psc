@@ -162,8 +162,13 @@ Form[] Function GetLearnedSpells(Actor akActor)
 		Spell currentLastLearnedSpell = akActor.GetNthSpell(numRefSpells - 1)
 		If lastLearnedSpell == currentLastLearnedSpell && numRefSpells+numBaseSpells == totalSpells
 			Main.Log("Skipping cache refresh, spell count and last learned spell is the same as last time.")
-			return learnedSpellCache
+			return PapyrusUtil.FormArray(0)
 		EndIf
+	EndIf
+
+	If forceRefreshCacheId != 0
+		SetOptionFlags(forceRefreshCacheId, IsOptionDisabled(true), true)
+		SetTextOptionValue(forceRefreshCacheId, "Refreshing spell cache...")
 	EndIf
 
 	totalSpells = numRefSpells + numBaseSpells
@@ -215,11 +220,6 @@ Event OnBuildSpellCache(string eventName, string strArg, float numArg, Form send
 		Main.Log("Populating spell cache...", Main.LogLevel_Notification)
 
 		Utility.WaitMenuMode(0.5)
-
-		If forceRefreshCacheId != 0
-			SetOptionFlags(forceRefreshCacheId, IsOptionDisabled(true), true)
-			SetTextOptionValue(forceRefreshCacheId, "Refreshing spell cache...")
-		EndIf
 
 		Form[] spellCache = GetLearnedSpells(Main.PlayerRef)
 		If spellCache.length > 0
@@ -290,8 +290,8 @@ Event OnPageReset(string page)
 
 
 	ElseIf page == Pages[1]
-		SendModEvent("WMAG_BuildSpellCache")
 		BuildSpellsPage()
+		SendModEvent("WMAG_BuildSpellCache")
 	EndIf
 
 	Main.Log("OnPageReset("+page+") - Exit")
@@ -467,14 +467,14 @@ Spell Function FindFirstUnmappedSpell(int keyCode)
 EndFunction
 
 Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, string conflictName)
+	If updatingSpellCache
+		ShowMessage("Warrior Magic is updating the spell cache, please wait before creating any keybindings..")
+		return
+	EndIf
+
 	If AbortKeybinding(conflictControl, conflictName)
 		Return
 	EndIf
-
-	; If updatingSpellCache
-	; 	ShowMessage("Warrior Magic is updating the spell cache, please wait before creating any keybindings..")
-	; 	return
-	; EndIf
 
 	int displayIndex = spellSlotKeyOptionId.Find(option)
 	If option == spellSlotCreateIndex && keyCode != -1
@@ -489,7 +489,6 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 
 			ForcePageReset()
 		EndIf
-		
 	ElseIf displayIndex != -1
 		int slotIndex = spellSlotIndex[displayIndex]
 		int currentKeyCode = Main.GetKeyCodeByIndex(slotIndex)
@@ -517,7 +516,7 @@ Event OnOptionSelect(int option)
 			return
 		EndIf
 
-		If ShowMessage("If you've recently learned some new spells and they're not showing up you can try refreshing the spell cache, depending on the amount of spells your character knows. This operation can take upwards of 30 seconds to complete.", true, "Refresh", "Abort")
+		If ShowMessage("If you've recently learned some new spells and they're not showing up, you can try refreshing the spell cache. This operation can take up to a minute or more depending on how many spells your character knows but you CAN close the MCM while it runs, a notification will be displayed once it's done.", true, "Refresh", "Abort")
 			lastLearnedSpell = None
 			learnedSpellsCached = false
 			learnedSpellCache = PapyrusUtil.FormArray(0)

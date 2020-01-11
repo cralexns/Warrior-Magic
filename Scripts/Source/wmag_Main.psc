@@ -135,6 +135,7 @@ EndFunction
 Function Reset()
 	GoToState("")
 	GoToState("Normal")
+	ValidateEquipped()
 EndFunction
 
 Event OnPlayerLoadGame()
