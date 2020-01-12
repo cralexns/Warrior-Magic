@@ -241,5 +241,11 @@ Event OnObjectEquipped(Form akBaseObject, ObjectReference akReference)
 	Weapon w = akBaseObject as Weapon
 	If w != None
 		Main.OnWeaponEquipped(w)
+		return
+	EndIf
+
+	Book b = akBaseObject as Book
+	If b != None && b.GetSpell() != None
+		Main.OnSpellBookEquipped(b)
 	EndIf
 EndEvent

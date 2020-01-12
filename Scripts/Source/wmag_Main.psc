@@ -62,11 +62,13 @@ int[] validWeaponTypes
 
 ;/
 	TODO:
-	1. Consider adding support for modifiers in keybindings.
+	. Maybe try checking for when spell tomes are equipped and only refresh spell cache when that happens.
+	1. Add localization https://github.com/schlangster/skyui/wiki/MCM-Advanced-Features#Localization
+	2. Consider adding support for modifiers in keybindings.
 /;
 
 Event OnInit()
-	Version = 0.85
+	Version = 0.86
 	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,10", ",")
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
@@ -536,6 +538,20 @@ Event OnWeaponEquipped(Weapon equipped)
 	;Log("OnWeaponEquipped: " + equipped)
 	ValidateEquipped()
 EndEvent
+
+Event OnSpellBookEquipped(Book equipped)
+	Config.ResetSpellsCache()
+	; If UI.IsMenuOpen("InventoryMenu")
+	; 	RegisterForMenu("InventoryMenu")
+	; Else
+	; 	Config.BuildSpellCache()
+	; EndIf
+EndEvent
+
+; Event OnMenuClose(string MenuName)
+; 	UnregisterForMenu("InventoryMenu")
+; 	Config.BuildSpellCache()
+; EndEvent
 
 bool Function IsEquippedValid()
 	int leftType = PlayerRef.GetEquippedItemType(0)
@@ -1018,6 +1034,7 @@ State Charged
 		Spell spellToCast = chargedSpell
 		If spellToCast == None
 			Log("Charged["+chargedState+"]: CastSpell() chargedSpell == None. Abort.")
+			chargedState = 4
 			GoToState("Normal")
 			Return
 		EndIf
@@ -1135,7 +1152,7 @@ State Charged
 		ModSpellsDuration.Revert()
 		ModSpellsMagnitude.Revert()
 
-		float timeout = 1.0
+		float timeout = 0.5
 		While timeout > 0.0 && (chargedState != 2 && chargedState != 4)
 			Utility.Wait(0.05)
 			timeout -= 0.05
@@ -1148,7 +1165,7 @@ State Charged
 		chargedState *= 2
 
 		If isBlocking
-			float bTimeout = 1.0
+			float bTimeout = 0.2
 			While PlayerRef.GetAnimationVariableBool("IsBlocking") && bTimeout > 0
 				Debug.SendAnimationEvent(PlayerRef, "blockStop")
 				Utility.Wait(0.1)
@@ -1206,6 +1223,7 @@ Function CastSpell()
 EndFunction
 
 bool Function AutoCast(bool ignoreHoldingKey = false)
+	return false
 EndFunction
 
 Function SetCharged(bool isChargeSuccess)

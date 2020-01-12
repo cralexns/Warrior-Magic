@@ -70,27 +70,27 @@ string[] targetTypes
 Event OnConfigInit()
 	Main.Log("OnConfigInit() - Enter")
 	Pages = new string[2]
-	Pages[0] = "General "
-	Pages[1] = "Spells "
+	Pages[0] = "$General"
+	Pages[1] = "$Spells"
 	
 	ModName = Main.ModName
 
 	chargeModes = new string[3]
-	chargeModes[0] = "Instant"
-	chargeModes[1] = "Cast Time"
-	chargeModes[2] = "Magicka Cost"
+	chargeModes[0] = "$Instant"
+	chargeModes[1] = "$Cast Time"
+	chargeModes[2] = "$Magicka Cost"
 
 	releaseModes = new string[3]
-	releaseModes[0] = "Manual "
-	releaseModes[1] = "On Key Release"
-	releaseModes[2] = "Automatic"
+	releaseModes[0] = "$Manual"
+	releaseModes[1] = "$On Key Release"
+	releaseModes[2] = "$Automatic"
 
 	logLevelMenuEntries = new string[5]
-	logLevelMenuEntries[0] = "Disabled"
-	logLevelMenuEntries[1] = "Disk"
-	logLevelMenuEntries[2] = "Console"
-	logLevelMenuEntries[3] = "Notification"
-	logLevelMenuEntries[4] = "Message Box"
+	logLevelMenuEntries[0] = "$Disabled"
+	logLevelMenuEntries[1] = "$Disk"
+	logLevelMenuEntries[2] = "$Console"
+	logLevelMenuEntries[3] = "$Notification"
+	logLevelMenuEntries[4] = "$Message Box"
 
 	castingTypes = new string[3]
 	castingTypes[0] = "Constant"
@@ -121,7 +121,6 @@ Event OnConfigOpen()
 EndEvent
 
 Event OnConfigClose()
-	learnedSpellsCached = false
 	UnregisterForAllModEvents()
 	Main.Reset()
 
@@ -129,7 +128,7 @@ Event OnConfigClose()
 EndEvent
 
 Function ResetSpellsCache()
-	lastLearnedSpell = None
+	learnedSpellsCached = false
 EndFunction
 
 ;/ Event OnConfigRegister()
@@ -151,25 +150,19 @@ EndEvent
 
 int totalSpells
 int processedSpells
-Spell lastLearnedSpell
 Form[] Function GetLearnedSpells(Actor akActor)
 	ActorBase basePlayer = akActor.GetActorBase()
 
 	int numRefSpells = akActor.GetSpellCount()
 	int numBaseSpells = basePlayer.GetSpellCount()
 
-	If learnedSpellCache.length > 0 && lastLearnedSpell != None
-		Spell currentLastLearnedSpell = akActor.GetNthSpell(numRefSpells - 1)
-		If lastLearnedSpell == currentLastLearnedSpell && numRefSpells+numBaseSpells == totalSpells
-			Main.Log("Skipping cache refresh, spell count and last learned spell is the same as last time.")
-			return PapyrusUtil.FormArray(0)
-		EndIf
-	EndIf
-
-	If forceRefreshCacheId != 0
-		SetOptionFlags(forceRefreshCacheId, IsOptionDisabled(true), true)
-		SetTextOptionValue(forceRefreshCacheId, "Refreshing spell cache...")
-	EndIf
+	; If learnedSpellCache.length > 0 && lastLearnedSpell != None
+	; 	Spell currentLastLearnedSpell = akActor.GetNthSpell(numRefSpells - 1)
+	; 	If lastLearnedSpell == currentLastLearnedSpell && numRefSpells+numBaseSpells == totalSpells
+	; 		Main.Log("Skipping cache refresh, spell count and last learned spell is the same as last time.")
+	; 		return PapyrusUtil.FormArray(0)
+	; 	EndIf
+	; EndIf
 
 	totalSpells = numRefSpells + numBaseSpells
 	Form[] learnedSpells = PapyrusUtil.FormArray(totalSpells)
@@ -197,8 +190,6 @@ Form[] Function GetLearnedSpells(Actor akActor)
 		processedSpells = idx
 	EndWhile
 
-	lastLearnedSpell = spellToCheck
-
 	return PapyrusUtil.SliceFormArray(learnedSpells, 0, spellCount - 1)
 EndFunction
 
@@ -215,43 +206,55 @@ Form[] learnedSpellCache
 Event OnBuildSpellCache(string eventName, string strArg, float numArg, Form sender)
 	Main.Log("OnBuildSpellCache()")
 
-	If !learnedSpellsCached && !updatingSpellCache
-		updatingSpellCache = true
-		Main.Log("Populating spell cache...", Main.LogLevel_Notification)
-
+	If !learnedSpellsCached
 		Utility.WaitMenuMode(0.5)
 
-		Form[] spellCache = GetLearnedSpells(Main.PlayerRef)
-		If spellCache.length > 0
-			If forceRefreshCacheId != 0
-				SetTextOptionValue(forceRefreshCacheId, "Spell cache refreshed!")
-			EndIf
-
-			learnedSpellCache = spellCache
-			learnedSpellsCached = true
+		If forceRefreshCacheId != 0
+			SetOptionFlags(forceRefreshCacheId, IsOptionDisabled(true), true)
+			SetTextOptionValue(forceRefreshCacheId, "$WMAG_SPELLCACHEREFRESHING")
 		EndIf
 
-		Main.Log("Finished populating spell cache.", Main.LogLevel_Notification)
-		updatingSpellCache = false
+		BuildSpellCache()
+
+		If forceRefreshCacheId != 0
+			SetTextOptionValue(forceRefreshCacheId, "$WMAG_SPELLCACHEREFRESHED")
+		EndIf
 	EndIf
 EndEvent
+
+Function BuildSpellCache()
+	Main.Log("BuildSpellCache() - updatingSpellCache="+updatingSpellCache)
+	If !updatingSpellCache
+		updatingSpellCache = true
+
+		Main.Log("Populating spell cache...", Main.LogLevel_Notification)
+
+		Form[] spellCache = GetLearnedSpells(Main.PlayerRef)
+		learnedSpellCache = spellCache
+		learnedSpellsCached = true
+
+		Main.Log("Finished populating spell cache.", Main.LogLevel_Notification)
+
+		updatingSpellCache = false
+	EndIf
+EndFunction
 
 
 Event OnPageReset(string page)
 	Main.Log("OnPageReset("+page+") - Enter")
 	If page == Pages[0] || !Enabled || page == ""
 		SetCursorFillMode(LEFT_TO_RIGHT)
-		AddToggleOptionST("ToggleMod", "Mod Enabled", Enabled)
+		AddToggleOptionST("ToggleMod", "$Mod Enabled", Enabled)
 
 		If !Enabled
 			If IsModStarting
 				SetCursorPosition(0)
-				AddTextOption("Mod Enabled", "[Pending Activation]")
+				AddTextOption("Mod Enabled", "$WMAG_PENDINGACTIVATE")
 			EndIf
 			Return
 		EndIf
 
-		AddMenuOptionST("LogLevel", "Debug Log Level", logLevelMenuEntries[Main.LogLevel])
+		AddMenuOptionST("LogLevel", "$WMAG_LOGLEVEL", logLevelMenuEntries[Main.LogLevel])
 
 		float[] autoCastTimes = StorageUtil.FloatListToArray(Main, Main.ChargedDoneLatencyName)
 		float averageAutoCast = zen_Util.GetFloatArraySum(autoCastTimes) / zen_Util.Max(autoCastTimes.length, 1)
@@ -261,32 +264,32 @@ Event OnPageReset(string page)
 
 		SetCursorFillMode(TOP_TO_BOTTOM)
 		SetCursorPosition(3)
-		AddTextOptionST("LatencyAutoText", "Latency (CB)", (averageAutoCast * 1000) as int+" ms")
-		AddTextOptionST("LatencyQueueText", "Latency (CD)", (averageQueue * 1000) as int+" ms")
+		AddTextOptionST("LatencyAutoText", "$WMAG_LAT1", (averageAutoCast * 1000) as int+" ms")
+		AddTextOptionST("LatencyQueueText", "$WMAG_LAT2", (averageQueue * 1000) as int+" ms")
 
 		SetCursorPosition(4)
-		AddToggleOptionST("DisableChargeAnimationToggle", "Disable Charge Animation", Main.DisableChargeAnimation)
-		AddToggleOptionST("ConcentrationCastingFixToggle", "Concentration Casting Fix", Main.ConcentrationCastingFix)
-		AddSliderOptionST("MaximumDurationModSlider", "Duration Extension Max", Main.MaximumDurationModifier, timesFormat)
-		AddKeyMapOptionST("DispelKeyModifierKeyMap", "Dispel Key Modifier", Main.DispelKeyModifier)
+		AddToggleOptionST("DisableChargeAnimationToggle", "$WMAG_DISCHARGEANIM", Main.DisableChargeAnimation)
+		AddToggleOptionST("ConcentrationCastingFixToggle", "$WMAG_CONCCASTFIX", Main.ConcentrationCastingFix)
+		AddSliderOptionST("MaximumDurationModSlider", "$WMAG_DUREXTMAX", Main.MaximumDurationModifier, timesFormat)
+		AddKeyMapOptionST("DispelKeyModifierKeyMap", "$WMAG_DISPKEYMOD", Main.DispelKeyModifier)
 
 		SetCursorPosition(9)
-		AddToggleOptionST("JumpAttackToggle", "Enable Jump Attack", EnableJumpAttackHack)
-		AddToggleOptionST("EnableSweepingAttacksToggle", "Enable Sweeping Attacks /w 1H", EnableSweepingAttacks)
+		AddToggleOptionST("JumpAttackToggle", "$WMAG_JUMPATTACK", EnableJumpAttackHack)
+		AddToggleOptionST("EnableSweepingAttacksToggle", "$WMAG_SWEEPATTACK", EnableSweepingAttacks)
 		
 		SetCursorPosition(14)
-		AddHeaderOption("Offensive Casting", IsOptionDisabled(true))
-		AddMenuOptionST("SpellChargeModeMenuO", "Charge Mode", chargeModes[Main.SpellChargeMode[1]])
-		AddSliderOptionST("MinimumChargeTimeSliderO", "Min. Charge Time", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
-		AddSliderOptionST("MaximumChargeTimeSliderO", "Max. Charge Time", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
-		AddMenuOptionST("SpellReleaseModeO", "Release Mode", releaseModes[Main.SpellReleaseMode[1]])
+		AddHeaderOption("$Offensive Casting", IsOptionDisabled(true))
+		AddMenuOptionST("SpellChargeModeMenuO", "$WMAG_CHARGEMODE", chargeModes[Main.SpellChargeMode[1]])
+		AddSliderOptionST("MinimumChargeTimeSliderO", "$WMAG_MINCHARGETIME", Main.MinimumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
+		AddSliderOptionST("MaximumChargeTimeSliderO", "$WMAG_MAXCHARGETIME", Main.MaximumChargeTime[1], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[1] != Main.SPELLCHARGE_MAXMAGIC))
+		AddMenuOptionST("SpellReleaseModeO", "$WMAG_RELEASEMODE", releaseModes[Main.SpellReleaseMode[1]])
 
 		SetCursorPosition(15)
 		AddHeaderOption("Defensive Casting", IsOptionDisabled(true))
-		AddMenuOptionST("SpellChargeModeMenuD", "Charge Mode", chargeModes[Main.SpellChargeMode[0]])
-		AddSliderOptionST("MinimumChargeTimeSliderD", "Min. Charge Time", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
-		AddSliderOptionST("MaximumChargeTimeSliderD", "Max. Charge Time", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
-		AddMenuOptionST("SpellReleaseModeD", "Release Mode", releaseModes[Main.SpellReleaseMode[0]])
+		AddMenuOptionST("SpellChargeModeMenuD", "$WMAG_CHARGEMODE", chargeModes[Main.SpellChargeMode[0]])
+		AddSliderOptionST("MinimumChargeTimeSliderD", "$WMAG_MINCHARGETIME", Main.MinimumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
+		AddSliderOptionST("MaximumChargeTimeSliderD", "$WMAG_MAXCHARGETIME", Main.MaximumChargeTime[0], secondsFormat, IsOptionDisabled(Main.SpellChargeMode[0] != Main.SPELLCHARGE_MAXMAGIC))
+		AddMenuOptionST("SpellReleaseModeD", "$WMAG_RELEASEMODE", releaseModes[Main.SpellReleaseMode[0]])
 
 
 	ElseIf page == Pages[1]
@@ -330,7 +333,7 @@ Function BuildSpellsPage()
 
 			If keyCode > 0 && spells.length > 0
 				int sIdx = 0
-				int keyOptionId = AddKeyMapOption("KEY", keyCode)
+				int keyOptionId = AddKeyMapOption("$WMAG_KEY", keyCode)
 				SetCursorFillMode(TOP_TO_BOTTOM)
 				While sIdx < spells.Length
 					spellSlotIndex[ssIdx] = slotIdx
@@ -339,20 +342,20 @@ Function BuildSpellsPage()
 					If sIdx+1 == spells.Length
 						SetCursorFillMode(LEFT_TO_RIGHT)
 					EndIf
-					spellSlotSpellOptionId[ssIdx] = AddMenuOption("SPELL", spells[sIdx].GetName())
+					spellSlotSpellOptionId[ssIdx] = AddMenuOption("$WMAG_SPELL", spells[sIdx].GetName())
 					If sIdx+1 == spells.Length && StorageUtil.CountObjIntValuePrefix(Main, "WMAG_OVERRIDE_"+keyCode+"_") >= 1
 						int chargeOverrideIndex = StorageUtil.GetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", -1)
 						int releaseOverrideIndex = StorageUtil.GetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", -1)
 
 						If chargeOverrideIndex >= 0
-							spellSlotOverrideChargeId[ssIdx] = AddMenuOption("Charge Override", chargeModes[chargeOverrideIndex])
+							spellSlotOverrideChargeId[ssIdx] = AddMenuOption("$WMAG_CHARGEOVERRIDE", chargeModes[chargeOverrideIndex])
 						Else
 							StorageUtil.UnsetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE")
 							AddEmptyOption()
 						EndIf
 						
 						If releaseOverrideIndex >= 0
-							spellSlotOverrideReleaseId[ssIdx] = AddMenuOption("Release Override", releaseModes[releaseOverrideIndex])
+							spellSlotOverrideReleaseId[ssIdx] = AddMenuOption("$WMAG_RELEASEOVERRIDE", releaseModes[releaseOverrideIndex])
 						Else
 							StorageUtil.UnsetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE")
 							AddEmptyOption()
@@ -369,18 +372,18 @@ Function BuildSpellsPage()
 
 	AddEmptyOption()
 	AddEmptyOption()
-	AddHeaderOption("Create a spell keybind")
+	AddHeaderOption("$Create a spell keybind")
 	AddEmptyOption()
 
 	SetCursorFillMode(TOP_TO_BOTTOM)
 
 	enableOverride = false
-	AddToggleOptionST("EnableOverride", "Enable Override", enableOverride)
+	AddToggleOptionST("EnableOverride", "$WMAG_ENABLEOVERRIDE", enableOverride)
 
 	SetCursorFillMode(LEFT_TO_RIGHT)
-	spellSlotCreateIndex = AddKeyMapOption("Click to bind key", -1)
+	spellSlotCreateIndex = AddKeyMapOption("$WMAG_BINDCREATE", -1)
 	
-	forceRefreshCacheId = AddTextOption("", "[Refresh spell cache]")
+	forceRefreshCacheId = AddTextOption("", "$WMAG_REFRESHSPELLCACHE")
 EndFunction
 
 int Function IsOptionDisabled(bool disabled = true)
@@ -468,7 +471,7 @@ EndFunction
 
 Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, string conflictName)
 	If updatingSpellCache
-		ShowMessage("Warrior Magic is updating the spell cache, please wait before creating any keybindings..")
+		ShowMessage("$WMAG_KEYBINDBLOCKEDBYCACHEREFRESH")
 		return
 	EndIf
 
@@ -512,14 +515,12 @@ EndEvent
 Event OnOptionSelect(int option)
 	If option == forceRefreshCacheId
 		If updatingSpellCache
-			ShowMessage("Currently in the process of updating spell cache, please wait..")
+			ShowMessage("$WMAG_UPDATINGSPELLCACHE")
 			return
 		EndIf
 
-		If ShowMessage("If you've recently learned some new spells and they're not showing up, you can try refreshing the spell cache. This operation can take up to a minute or more depending on how many spells your character knows but you CAN close the MCM while it runs, a notification will be displayed once it's done.", true, "Refresh", "Abort")
-			lastLearnedSpell = None
+		If ShowMessage("$WMAG_UPDATESPELLCACHE", true, "$Refresh", "$Abort")
 			learnedSpellsCached = false
-			learnedSpellCache = PapyrusUtil.FormArray(0)
 			ForcePageReset()
 		EndIf
 	EndIf
@@ -547,9 +548,9 @@ Event OnOptionMenuOpen(int option)
 			EndWhile
 
 			If !learnedSpellsCached
-				ShowMessage("Loading spells timed out.. If you have a lot of spells, abilities etc. it can take a while to filter, wait a little and try again.", false)
+				ShowMessage("$WMAG_LOADTIMEOUT", false)
 			Else
-				SetMenuOptionValue(option, "Updating menu..")
+				SetMenuOptionValue(option, "$WMAG_UPDATINGMENU")
 			EndIf
 
 			LoadSpellsInSpellMenu(spellMenuDisplayIndex)
@@ -598,17 +599,17 @@ EndFunction
 Event OnOptionHighlight(int option)
 	If spellSlotSpellOptionId.Find(option) != -1
 		;; Spell Menu
-		SetInfoText("Click to change keybound spell, set default to remove spell.")
+		SetInfoText("$WMAG_SPELL_INFO")
 	ElseIf spellSlotKeyOptionId.Find(option) != -1
 		;; Key Menu
-		SetInfoText("Click to change keybinding, set default to clear keybinding and all spells.")
+		SetInfoText("$WMAG_KEY_INFO")
 	ElseIf spellSlotCreateIndex == option
 		;; Create
-		SetInfoText("Enter an unbound key to create a new keybinding or an existing key to add another spell to that key.")
+		SetInfoText("$WMAG_BINDCREATE_INFO")
 	ElseIf spellSlotOverrideChargeId.Find(option) != -1
-		SetInfoText("Set a charge mode override for this specific keybinding, set default (R) to remove override.")
+		SetInfoText("$WMAG_CHARGEOVERRIDE_INFO")
 	ElseIf spellSlotOverrideReleaseId.Find(option) != -1
-		SetInfoText("Set a release mode override for this specific keybinding, set default (R) to remove override.")
+		SetInfoText("$WMAG_RELEASEOVERRIDE_INFO")
 	EndIf
 EndEvent
 
@@ -724,7 +725,7 @@ State ToggleMod
 	Event OnSelectST()
 		SetOptionFlagsST(OPTION_FLAG_DISABLED)
 		If IsModStarting
-			ShowMessage("Exit all menus to allow the mod to start.", false)
+			ShowMessage("$WMAG_MODACTIVATEMESSAGE", false)
 			return
 		ElseIf Enabled
 			Main.Stop()
@@ -738,11 +739,11 @@ State ToggleMod
 
 	Event OnHighlightST()
 		If IsModStarting
-			SetInfoText("Exit all menus to allow the mod to start.")
+			SetInfoText("$WMAG_MODACTIVATEMESSAGE")
 		ElseIf Enabled
-			SetInfoText("Disable all functions of the mod. Warning, this also reset all casting related settings.")
+			SetInfoText("$WMAG_DISABLEMODINFO")
 		Else
-			SetInfoText("Re-enable all functions of the mod.")
+			SetInfoText("$WMAG_ENABLEMODINFO")
 		EndIf
 	EndEvent
 EndState
@@ -765,7 +766,7 @@ State LogLevel
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set log level, setting this to 'Disabled' disables all debug related logging. Info, Warning and Errors will still be displayed and/or logged.")
+		SetInfoText("$WMAG_LOGLEVEL_INFO")
 	EndEvent
 EndState
 
@@ -776,7 +777,7 @@ State LatencyAutoText
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("The average time it takes the script to process spells from the time a button press is registered until spell is ready for casting. Click to reset averages.")
+		SetInfoText("$WMAG_LAT1_INFO")
 	EndEvent
 EndState
 
@@ -787,7 +788,7 @@ State LatencyQueueText
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("The average time it takes to prepare non-essentials after a spell is charged. Click to reset averages.")
+		SetInfoText("$WMAG_LAT2_INFO")
 	EndEvent
 EndState
 
@@ -813,7 +814,7 @@ State SpellChargeModeMenuD
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the behaviour of spell queue charging. Instant (1), based on the spell's Cast Time (2) or on the spell's Magicka Cost (3) relative to your maximum magicka.")
+		SetInfoText("$WMAG_CHARGEMODE_INFO")
 	EndEvent
 EndState
 
@@ -839,7 +840,7 @@ State SpellChargeModeMenuO
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the behaviour of spell queue charging. Instant (1), based on the spell's Cast Time (2) or on the spell's Magicka Cost (3) relative to your maximum magicka.")
+		SetInfoText("$WMAG_CHARGEMODE_INFO")
 	EndEvent
 EndState
 
@@ -862,7 +863,7 @@ State MinimumChargeTimeSliderO
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the minimum charge time in seconds, spells will never charge faster than this value.")
+		SetInfoText("$WMAG_MINCHARGETIME_INFO")
 	EndEvent
 EndState
 
@@ -885,7 +886,7 @@ State MaximumChargeTimeSliderO
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the maximum charge time in seconds, spells will never charge slower than this value.")
+		SetInfoText("$WMAG_MINCHARGETIME_INFO")
 	EndEvent
 EndState
 
@@ -908,7 +909,7 @@ State MinimumChargeTimeSliderD
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the minimum charge time in seconds, spells will never charge faster than this value.")
+		SetInfoText("$WMAG_MAXCHARGETIME_INFO")
 	EndEvent
 EndState
 
@@ -931,7 +932,7 @@ State MaximumChargeTimeSliderD
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the maximum charge time in seconds, spells will never charge slower than this value.")
+		SetInfoText("$WMAG_MAXCHARGETIME_INFO")
 	EndEvent
 EndState
 
@@ -953,7 +954,7 @@ State SpellReleaseModeD
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the behaviour of spell release after charging: Manual (on attack or block), after releasing charge key (2), or automatically once charged (3)")
+		SetInfoText("$WMAG_RELEASEMODE_INFO")
 	EndEvent
 EndState
 
@@ -975,7 +976,7 @@ State SpellReleaseModeO
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Set the behaviour of spell release after charging: Manual (on attack or block), after releasing charge key (2), or automatically once charged (3)")
+		SetInfoText("$WMAG_RELEASEMODE_INFO")
 	EndEvent
 EndState
 
@@ -986,7 +987,7 @@ State JumpAttackToggle
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Enable the ability to attack while jumping. (This is an experimental hack)")
+		SetInfoText("$WMAG_JUMPATTACK_INFO")
 	EndEvent
 EndState
 
@@ -997,7 +998,7 @@ State ConcentrationCastingFixToggle
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Enable a fix for concentration spells getting interrupted prematurely. (Mods calling [Cast - Spell] or [DispelSpell - Actor] can cause this)")
+		SetInfoText("$WMAG_CONCCASTFIX_INFO")
 	EndEvent
 EndState
 
@@ -1009,7 +1010,7 @@ State EnableSweepingAttacksToggle
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Allow sweeping attacks with 1H weapons. (Disabled in towns)")
+		SetInfoText("$WMAG_SWEEPATTACK_INFO")
 	EndEvent
 EndState
 
@@ -1020,7 +1021,7 @@ State DisableChargeAnimationToggle
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Disable charging animation allowing you to move while charging a spell.")
+		SetInfoText("$WMAG_DISCHARGEANIM_INFO")
 	EndEvent
 EndState
 
@@ -1035,7 +1036,7 @@ State MaximumDurationModSlider
 		SetSliderOptionValueST(value, timesFormat)
 	EndEvent
 	Event OnHighlightST()
-		SetInfoText("Recasting a spell on yourself extends it's duration up to selected a maximum of selected value times the spell's original duration. Set to 0 to disable this feature.")
+		SetInfoText("$WMAG_DUREXTMAX_INFO")
 	EndEvent
 EndState
 
@@ -1055,7 +1056,7 @@ State DispelKeyModifierKeyMap
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Hold this key in conjunction with a keybinding to dispel that keybound spell.")
+		SetInfoText("$WMAG_DISPKEYMOD_INFO")
 	EndEvent
 EndState
 
@@ -1066,6 +1067,6 @@ State EnableOverride
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("Enable charge/release override setting for this keybind.")
+		SetInfoText("$WMAG_ENABLEOVERRIDE_INFO")
 	EndEvent
 EndState
