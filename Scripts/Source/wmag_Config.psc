@@ -264,8 +264,8 @@ Event OnPageReset(string page)
 
 		SetCursorFillMode(TOP_TO_BOTTOM)
 		SetCursorPosition(3)
-		AddTextOptionST("LatencyAutoText", "$WMAG_LAT1", (averageAutoCast * 1000) as int+" ms")
-		AddTextOptionST("LatencyQueueText", "$WMAG_LAT2", (averageQueue * 1000) as int+" ms")
+		AddTextOptionST("LatencyText", "$WMAG_LAT", (averageAutoCast * 1000) as int+" ms (+" + (averageQueue * 1000) as int + "ms)")
+		AddToggleOptionST("SkipNonEssentialsToggle", "$WMAG_SKIPNONESSENTIALS", Main.SkipNonEssentialsForPerformance)
 
 		SetCursorPosition(4)
 		AddToggleOptionST("DisableChargeAnimationToggle", "$WMAG_DISCHARGEANIM", Main.DisableChargeAnimation)
@@ -770,25 +770,27 @@ State LogLevel
 	EndEvent
 EndState
 
-State LatencyAutoText
+State LatencyText
 	Event OnSelectST()
 		Main.LatencyMaintenance(Main.ChargedDoneLatencyName, 0, true)
+		Main.LatencyMaintenance(Main.ChargedBeginLatencyName, 0, true)
+		Main.Reset()
 		ForcePageReset()
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("$WMAG_LAT1_INFO")
+		SetInfoText("$WMAG_LAT_INFO")
 	EndEvent
 EndState
 
-State LatencyQueueText
+State SkipNonEssentialsToggle
 	Event OnSelectST()
-		Main.LatencyMaintenance(Main.ChargedBeginLatencyName, 0, true)
-		ForcePageReset()
+		Main.SkipNonEssentialsForPerformance = !Main.SkipNonEssentialsForPerformance
+		SetToggleOptionValueST(Main.SkipNonEssentialsForPerformance)
 	EndEvent
 
 	Event OnHighlightST()
-		SetInfoText("$WMAG_LAT2_INFO")
+		SetInfoText("$WMAG_SKIPNONESSENTIALS_INFO")
 	EndEvent
 EndState
 

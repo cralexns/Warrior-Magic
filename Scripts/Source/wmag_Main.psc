@@ -58,17 +58,18 @@ string Property KeyBindingIndexName = "KeyBindingIndex" Auto Hidden ; TODO: Add 
 string Property ChargedBeginLatencyName = "Latency1" Auto
 string Property ChargedDoneLatencyName = "Latency2" Auto
 
+bool Property SkipNonEssentialsForPerformance = false Auto
+float Property HighLatencyThreshold = 200.0 Auto
+
 int[] validWeaponTypes
 
 ;/
 	TODO:
-	. Maybe try checking for when spell tomes are equipped and only refresh spell cache when that happens.
-	1. Add localization https://github.com/schlangster/skyui/wiki/MCM-Advanced-Features#Localization
 	2. Consider adding support for modifiers in keybindings.
 /;
 
 Event OnInit()
-	Version = 0.86
+	Version = 0.9
 	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,10", ",")
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
@@ -456,16 +457,23 @@ Sound Function GetSoundEffectFor(MagicEffect mgef, int soundEffectType)
 	return SoundEffects.GetAt(0) as Sound
 EndFunction
 
-Function LatencyMaintenance(string keyName, int maxSize = 100, bool empty = false)
+float Function LatencyMaintenance(string keyName, int maxSize = 100, bool empty = false)
 	int len = StorageUtil.FloatListCount(self, keyName)
-		If len >= maxSize
+	If len == 0
+		len = 1
+	EndIf
+
+	float sum = GetFloatArraySum(StorageUtil.FloatListToArray(self, keyName))
+	float average = sum / len
+	If len >= maxSize
+		If !empty
 			StorageUtil.FloatListClear(self, keyName)
-			If !empty
-				float sum = GetFloatArraySum(StorageUtil.FloatListToArray(self, keyName))
-				float average = sum / len
-				StorageUtil.FloatListAdd(self, keyName, average)
-			EndIf
+			StorageUtil.FloatListAdd(self, keyName, average)
+		Else
+			StorageUtil.FloatListClear(self, keyName)
 		EndIf
+	EndIf
+	return average
 EndFunction
 
 
@@ -576,6 +584,7 @@ EndFunction
 bool isBashing
 int keyCodeInterruptCast
 bool safetyEnabled
+bool highLatency
 State Normal
 	Event OnBeginState()
 		;Log("Normal: OnBeginState()")
@@ -594,8 +603,14 @@ State Normal
 			readyInstanceId = 0
 		EndIf
 
-		LatencyMaintenance(ChargedBeginLatencyName)
-		LatencyMaintenance(ChargedDoneLatencyName)
+		float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName), LatencyMaintenance(ChargedDoneLatencyName)) * 1000
+		If highestAvgLatency >= HighLatencyThreshold && !highLatency
+			highLatency = true
+			Log("High latency detected ("+highLatency+"), skipping all non-essentials!", LogSeverity_Debug)
+		ElseIf highLatency && highestAvgLatency < HighLatencyThreshold - 25
+			highLatency = false
+			Log("Latency below threshold - 25, no longer skipping non-essentials..", LogSeverity_Debug)
+		EndIf
 	EndEvent
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
 		;Log("Normal: OnAnimationEvent(), asEventName = " + asEventName)
@@ -625,7 +640,7 @@ EndState
 	chargingInterval: Controls how fluid magicka is deducted while charging a spell
 /;
 
-float chargingInterval = 0.1
+float chargingInterval = 0.05
 
 int chargeKeyCodeDown
 Spell chargingSpell
@@ -683,8 +698,6 @@ State Charging
 		chargeMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_CHARGE", SpellChargeMode[isOffensiveSpell as int])
 		chargedReleaseMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_RELEASE", SpellReleaseMode[isOffensiveSpell as int])
 
-		
-
 		;int deliveryType = m.GetDeliveryType()
 
 		;Log("Spell ("+chargingSpell.GetName()+"): Type = " + chargingSpellCastingType + ", Target = " + chargingSpellTarget + " [Sounds] Charge = " + chargingSound + ", Ready = " + readySound)
@@ -740,16 +753,18 @@ State Charging
 		EndIf
 
 		If chargeTimeRequired > 0
-			Sound chargingSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CHARGE)
-			If !isBlocking && !DisableChargeAnimation
-				Debug.SendAnimationEvent(PlayerRef, "IdleCombatWeaponCheckStart")
-				cancelIdle = true
-			EndIf
+			If !SkipNonEssentialsForPerformance || !highLatency
+				Sound chargingSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CHARGE)
+				If !isBlocking && !DisableChargeAnimation
+					Debug.SendAnimationEvent(PlayerRef, "IdleCombatWeaponCheckStart")
+					cancelIdle = true
+				EndIf
 
-			
-			If chargingSound != None
-				chargingSoundInstance = chargingSound.Play(PlayerRef)
-				Sound.SetInstanceVolume(chargingSoundInstance, 100)
+				
+				If chargingSound != None
+					chargingSoundInstance = chargingSound.Play(PlayerRef)
+					Sound.SetInstanceVolume(chargingSoundInstance, 100)
+				EndIf
 			EndIf
 
 			OnUpdate()
@@ -774,6 +789,7 @@ State Charging
 		
 		If chargingSpellCostPaid < chargingSpellCost
 			If timeSpent > chargeTimeRequired
+				inputRegistrationTime += (timeSpent - chargeTimeRequired)
 				timeSpent = chargeTimeRequired
 			EndIf
 
@@ -850,9 +866,7 @@ State Charging
 			Sound.StopInstance(chargingSoundInstance)
 		EndIf
 
-		If chargingSuccess
-			
-		Else
+		If !chargingSuccess
 			Sound soundChargeFailure = SoundEffects.GetAt(2) as Sound
 			int failureInstanceId = soundChargeFailure.Play(PlayerRef)
 			Sound.SetInstanceVolume(failureInstanceId, 1.0)
@@ -897,9 +911,10 @@ State Charged
 		;Log("Charged["+chargedState+"]: OnBeginState(), spellIsHostile = " + spellIsHostile + ", spellTarget = " + spellTarget)
 		chargedState = 1
 		If inputRegistrationTime > 0
-			StorageUtil.FloatListAdd(self, ChargedBeginLatencyName, Utility.GetCurrentRealTime()-inputRegistrationTime)
+			StorageUtil.FloatListAdd(self, ChargedBeginLatencyName, Utility.GetCurrentRealTime() - inputRegistrationTime)
 			inputRegistrationTime = 0
 		EndIf
+
 		float chargedBeginTime = Utility.GetCurrentRealTime()
 
 		If readyInstanceId != 0
@@ -921,32 +936,34 @@ State Charged
 			StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
 		EndIf
 
-		chargedShader = StorageUtil.GetFormValue(chargedSpell, "WMAG_CACHE_SHADER") as EffectShader
-		If chargedShader == None
-			chargedShader = GetEffectShaderForMGEF(mEffect)
-			StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_SHADER", chargedShader)
+		If !SkipNonEssentialsForPerformance || !highLatency
+			chargedShader = StorageUtil.GetFormValue(chargedSpell, "WMAG_CACHE_SHADER") as EffectShader
+			If chargedShader == None
+				chargedShader = GetEffectShaderForMGEF(mEffect)
+				StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_SHADER", chargedShader)
+			EndIf
+
+			If chargedShader != None
+				chargedShader.Play(PlayerRef)
+			EndIf
+
+			readySound = GetSoundEffectFor(mEffect, SOUNDEFFECT_READY)
+			If readySound != None
+				readyInstanceId = readySound.Play(PlayerRef)
+				Sound.SetInstanceVolume(readyInstanceId, 1.0)
+			EndIf
+
+			releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
+			concentrationSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
 		EndIf
 
-		Sound chargingSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CHARGE) 
-		releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
-		concentrationSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
-		readySound = GetSoundEffectFor(mEffect, SOUNDEFFECT_READY)
-
-		If readySound != None
-			readyInstanceId = readySound.Play(PlayerRef)
-			Sound.SetInstanceVolume(readyInstanceId, 1.0)
-		EndIf
-
-		If chargedShader != None
-			chargedShader.Play(PlayerRef)
-		EndIf
-
-		StorageUtil.FloatListAdd(self, ChargedDoneLatencyName, Utility.GetCurrentRealTime() - chargedBeginTime)
+		float chargedDoneTime = Utility.GetCurrentRealTime()
 
 		chargedState = 2
 		AutoCast()
-		
 		isBusy = false
+
+		StorageUtil.FloatListAdd(self, ChargedDoneLatencyName, chargedDoneTime - chargedBeginTime)
 	EndEvent
 
 	bool Function AutoCast(bool ignoreHoldingKey = false)
@@ -1092,7 +1109,13 @@ State Charged
 
 				If chargedShader != None
 					chargedShader.Stop(PlayerRef)
+					chargedShader = None
 				EndIf
+			EndIf
+
+			If isBlocking
+				Debug.SendAnimationEvent(PlayerRef, "blockStop")
+				isBlocking = false
 			EndIf
 		EndIf
 
@@ -1127,11 +1150,12 @@ State Charged
 				If !safetyEnabled
 					safetyEnabled = true
 					;Log("Charged: OnUpdate() Safety Initiated.. State = " + GetState())
-					While GetState() == "Charged" && safetyEnabled
+					While GetState() == "Charged" && isCharged && safetyEnabled
 						;Log("Charged: OnUpdate() Safety -> Cast Spell = " + chargedSpell)
 						spellToCast.Cast(PlayerRef)
 						Utility.Wait(0.1)
 					EndWhile
+					safetyEnabled = false
 				EndIf
 			Else
 				spellToCast.Cast(PlayerRef)
@@ -1149,13 +1173,15 @@ State Charged
 
 		isBusy = true
 
-		ModSpellsDuration.Revert()
-		ModSpellsMagnitude.Revert()
+		If MaximumDurationModifier > 0
+			ModSpellsDuration.Revert()
+			ModSpellsMagnitude.Revert()
+		EndIf
 
-		float timeout = 0.5
+		float timeout = 0.35
 		While timeout > 0.0 && (chargedState != 2 && chargedState != 4)
-			Utility.Wait(0.05)
-			timeout -= 0.05
+			Utility.Wait(0.01)
+			timeout -= 0.01
 		EndWhile
 
 		If chargedState != 2 && chargedState != 4
@@ -1165,20 +1191,12 @@ State Charged
 		chargedState *= 2
 
 		If isBlocking
-			float bTimeout = 0.2
-			While PlayerRef.GetAnimationVariableBool("IsBlocking") && bTimeout > 0
-				Debug.SendAnimationEvent(PlayerRef, "blockStop")
-				Utility.Wait(0.1)
-				bTimeout -= 0.1
-			EndWhile
-			
+			Debug.SendAnimationEvent(PlayerRef, "blockStop")
 			isBlocking = false
 		EndIf
 
 		If isAttacking
-			If spellCastingType == CASTINGTYPE_CONCENTRATION
-				Debug.SendAnimationEvent(PlayerRef, "attackStop")
-			EndIf
+			Debug.SendAnimationEvent(PlayerRef, "attackStop")
 			isAttacking = false
 		EndIf
 
