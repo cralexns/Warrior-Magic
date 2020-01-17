@@ -69,7 +69,7 @@ int[] validWeaponTypes
 /;
 
 Event OnInit()
-	Version = 0.9
+	Version = 0.95
 	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,10", ",")
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
@@ -143,7 +143,7 @@ EndFunction
 
 Event OnPlayerLoadGame()
 	If !CheckIfPapyrusUtilInstalled()
-		Log("Warrior Magic couldn't find PapyrusUtil, please make sure you've installed PapyrusUtil - you can find this requirement on the mod page on Nexus.", LogSeverity_Error)
+		Log("Warrior Magic couldn't find PapyrusUtil, please make sure you've installed PapyrusUtil - you can find this requirement on the mod page.", LogSeverity_Error)
 		GoToState("Disabled")
 		return
 	EndIf
@@ -458,12 +458,13 @@ Sound Function GetSoundEffectFor(MagicEffect mgef, int soundEffectType)
 EndFunction
 
 float Function LatencyMaintenance(string keyName, int maxSize = 100, bool empty = false)
-	int len = StorageUtil.FloatListCount(self, keyName)
+	float[] lats = StorageUtil.FloatListToArray(self, keyName)
+	float sum = GetFloatArraySum(lats)
+	int len = lats.length
 	If len == 0
 		len = 1
 	EndIf
-
-	float sum = GetFloatArraySum(StorageUtil.FloatListToArray(self, keyName))
+	
 	float average = sum / len
 	If len >= maxSize
 		If !empty
@@ -1229,13 +1230,12 @@ EndState
 
 
 State Disabled
+	Event OnKeyDown(int keyCode)
+		Log("WMAG is disabled!", LogSeverity_Info)
+	EndEvent
 EndState
 
 ; Dummy functions.
-
-bool Function PrepareSpellForCasting(bool isOffensive, Spell spellToCast, int spellToCastType)
-	 return false
-EndFunction
 
 Function CastSpell()
 EndFunction
