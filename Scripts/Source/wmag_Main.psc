@@ -136,7 +136,7 @@ Function Stop()
 EndFunction
 
 Function Reset()
-	GoToState("")
+	GoToState("Disabled")
 	GoToState("Normal")
 	ValidateEquipped()
 EndFunction
@@ -586,6 +586,7 @@ bool isBashing
 int keyCodeInterruptCast
 bool safetyEnabled
 bool highLatency
+bool latencyCheck
 State Normal
 	Event OnBeginState()
 		;Log("Normal: OnBeginState()")
@@ -604,13 +605,17 @@ State Normal
 			readyInstanceId = 0
 		EndIf
 
-		float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName), LatencyMaintenance(ChargedDoneLatencyName)) * 1000
-		If highestAvgLatency >= HighLatencyThreshold && !highLatency
-			highLatency = true
-			Log("High latency detected ("+highLatency+"), skipping all non-essentials!", LogSeverity_Debug)
-		ElseIf highLatency && highestAvgLatency < HighLatencyThreshold - 25
-			highLatency = false
-			Log("Latency below threshold - 25, no longer skipping non-essentials..", LogSeverity_Debug)
+		If !latencyCheck
+			latencyCheck = true
+			float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName), LatencyMaintenance(ChargedDoneLatencyName)) * 1000
+			If highestAvgLatency >= HighLatencyThreshold && !highLatency
+				highLatency = true
+				Log("High latency detected ("+highLatency+"), skipping all non-essentials!", LogSeverity_Debug)
+			ElseIf highLatency && highestAvgLatency < HighLatencyThreshold - 25
+				highLatency = false
+				Log("Latency below threshold - 25, no longer skipping non-essentials..", LogSeverity_Debug)
+			EndIf
+			latencyCheck = false
 		EndIf
 	EndEvent
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
@@ -926,6 +931,7 @@ State Charged
 		If chargedSpell == None
 			Log("Charged["+chargedState+"]: OnBeginState() chargedSpell == None. Abort", LogSeverity_Debug)
 			chargedState = -1
+			isBusy = false
 			GoToState("Normal")
 			return
 		EndIf
@@ -1057,12 +1063,6 @@ State Charged
 			Return
 		EndIf
 
-		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
-			int releaseInstanceId = releaseSound.Play(PlayerRef)
-			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
-			Sound.StopInstance(releaseInstanceId)
-		EndIf
-
 		If MaximumDurationModifier > 0 && spellTarget == DELIVERYTYPE_SELF && spellCastingType == CASTINGTYPE_FIREANDFORGET
 			int eIdx = spellToCast.GetCostliestEffectIndex()
 			MagicEffect ef = spellToCast.GetNthEffectMagicEffect(eIdx)
@@ -1080,6 +1080,12 @@ State Charged
 			Else
 				StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
 			EndIf
+		EndIf
+
+		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
+			int releaseInstanceId = releaseSound.Play(PlayerRef)
+			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
+			Sound.StopInstance(releaseInstanceId)
 		EndIf
 
 		chargedState = 4
@@ -1219,6 +1225,8 @@ State Charged
 			concentrationInstanceId = 0
 		EndIf
 
+		releaseSound = None
+		concentrationSound = None
 		safetyEnabled = false
 		chargedSpell = None
 		keyCodeInterruptCast = -1
@@ -1230,6 +1238,13 @@ EndState
 
 
 State Disabled
+	Event OnBeginState()
+		latencyCheck = false
+		isBusy = false
+		IsCharged = false
+		IsCharging = false
+		chargedState = 0
+	EndEvent
 	Event OnKeyDown(int keyCode)
 		Log("WMAG is disabled!", LogSeverity_Info)
 	EndEvent
