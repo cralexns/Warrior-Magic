@@ -65,12 +65,13 @@ int[] validWeaponTypes
 
 ;/
 	TODO:
+	1. Test if we can make bombardment work.
 	2. Consider adding support for modifiers in keybindings.
 /;
 
 Event OnInit()
-	Version = 0.95
-	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,10", ",")
+	Version = 0.97
+	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,7,12", ",")
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
 		SpellChargeMode = new int[2]
@@ -176,7 +177,7 @@ Event OnPlayerLoadGame()
 EndEvent
 
 Function RegisterEvents()
-	string[] animationEvents = StringUtil.Split("HitFrame,blockStartOut,SoundPlay.NPCHumanCombatShieldBlock,blockStop,SoundPlay.NPCHumanCombatShieldRelease,attackStop,PowerAttack_Start_end,weaponSwing,weaponLeftSwing,staggerStart", ",")
+	string[] animationEvents = StringUtil.Split("HitFrame,blockStartOut,SoundPlay.NPCHumanCombatShieldBlock,blockStop,SoundPlay.NPCHumanCombatShieldRelease,attackStop,PowerAttack_Start_end,weaponSwing,weaponLeftSwing,staggerStart,arrowRelease", ",")
 	Log("Register " + animationEvents.length + " combat related animations..", LogSeverity_Debug)
 
 	int idx = 0
@@ -1001,7 +1002,7 @@ State Charged
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
 		;Log("Charged["+chargedState+"]: OnAnimationEvent(akSource = " + akSource + ", asEventName = " + asEventName)
 		If spellIsHostile ;|| spellTarget != 0
-			If asEventName == "HitFrame"
+			If asEventName == "HitFrame" || asEventName == "arrowRelease"
 				CastSpell()
 			ElseIf asEventName == "attackStop"
 				isAttacking = false
@@ -1164,8 +1165,6 @@ State Charged
 					EndWhile
 					safetyEnabled = false
 				EndIf
-			Else
-				spellToCast.Cast(PlayerRef)
 			EndIf
 		EndIf
 	EndEvent
