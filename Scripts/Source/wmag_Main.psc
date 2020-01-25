@@ -61,17 +61,18 @@ string Property ChargedDoneLatencyName = "Latency2" Auto
 bool Property SkipNonEssentialsForPerformance = false Auto
 float Property HighLatencyThreshold = 200.0 Auto
 
-int[] validWeaponTypes
+int[] validMeleeTypes
+int[] validRangedTypes
 
 ;/
 	TODO:
-	1. Test if we can make bombardment work.
 	2. Consider adding support for modifiers in keybindings.
 /;
 
 Event OnInit()
-	Version = 0.97
-	validWeaponTypes = StringToIntArray("1,2,3,4,5,6,7,12", ",")
+	Version = 0.98
+	validMeleeTypes = StringToIntArray("1,2,3,4,5,6", ",")
+	validRangedTypes = StringToIntArray("7,12", ",")
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
 		SpellChargeMode = new int[2]
@@ -101,8 +102,6 @@ Function Initialize()
 	EndIf
 	initStarted = true
 
-	RegisterEvents()
-	
 	string versionText = StringUtil.Substring(Version as string, 0, StringUtil.Find(Version as string, ".")+3)
 	Log(ModName+" ("+versionText+") installed.", LogLevel_Notification)
 
@@ -149,6 +148,12 @@ Event OnPlayerLoadGame()
 		return
 	EndIf
 
+	If Version < 0.98
+		string oldVersion = StringUtil.Substring(Version as string, 0, StringUtil.Find(Version as string, ".")+3)
+		OnInit()
+		Log("Upgraded from "+oldVersion+" to 0.98 - enjoy bow/crossbow support!", LogLevel_Notification)
+	EndIf
+
 	RegisterEvents()
 	RegisterKeys()
 	CheckIfPapyrusExtenderInstalled()
@@ -177,7 +182,7 @@ Event OnPlayerLoadGame()
 EndEvent
 
 Function RegisterEvents()
-	string[] animationEvents = StringUtil.Split("HitFrame,blockStartOut,SoundPlay.NPCHumanCombatShieldBlock,blockStop,SoundPlay.NPCHumanCombatShieldRelease,attackStop,PowerAttack_Start_end,weaponSwing,weaponLeftSwing,staggerStart,arrowRelease", ",")
+	string[] animationEvents = StringUtil.Split("HitFrame,blockStartOut,SoundPlay.NPCHumanCombatShieldBlock,blockStop,SoundPlay.NPCHumanCombatShieldRelease,attackStop,PowerAttack_Start_end,weaponSwing,weaponLeftSwing,staggerStart,arrowRelease,bowDrawStart,BowRelease,bowEnd", ",")
 	Log("Register " + animationEvents.length + " combat related animations..", LogSeverity_Debug)
 
 	int idx = 0
@@ -563,18 +568,32 @@ EndEvent
 ; 	Config.BuildSpellCache()
 ; EndEvent
 
-bool Function IsEquippedValid()
+bool rangedEquipped = false
+
+int Property EQUIPPED_INVALID = 0 Auto Hidden
+int Property EQUIPPED_MELEE = 1 Auto Hidden
+int Property EQUIPPED_RANGED = 2 Auto Hidden
+
+int Function GetEquippedType()
 	int leftType = PlayerRef.GetEquippedItemType(0)
 	int rightType = PlayerRef.GetEquippedItemType(1)
 
-	return validWeaponTypes.Find(leftType) != -1 || validWeaponTypes.Find(rightType) != -1
+	If validRangedTypes.Find(leftType) != -1 || validRangedTypes.Find(rightType) != -1
+		return EQUIPPED_RANGED
+	EndIf
+
+	If validMeleeTypes.Find(leftType) != -1 || validMeleeTypes.Find(rightType) != -1
+		return EQUIPPED_MELEE
+	EndIf
+	return EQUIPPED_INVALID
 EndFunction
 
+int equippedType
 Function ValidateEquipped()
-	bool isValid = IsEquippedValid()
-	If isValid && GetState() == "Waiting"
+	equippedType = GetEquippedType()
+	If equippedType > 0 && GetState() == "Waiting"
 		GoToState("Normal")
-	ElseIf !isValid && GetState() != "Waiting"
+	ElseIf equippedType == 0 && GetState() != "Waiting"
 		GoToState("Waiting")
 	EndIf
 EndFunction
@@ -912,6 +931,7 @@ int chargedReleaseMode
 int chargedState
 EffectShader chargedShader
 Sound readySound
+bool bowDrawn
 State Charged
 	Event OnBeginState()
 		isCharged = true
@@ -980,19 +1000,23 @@ State Charged
 		If (spellCastingType == CASTINGTYPE_CONCENTRATION && chargedReleaseMode != RELEASEMODE_MANUAL) || autoCast
 			If !isDefensiveSpell ;&& !isAttacking
 				isAttacking = true
-				Debug.SendAnimationEvent(PlayerRef, "attackStart")
+				If equippedType == EQUIPPED_RANGED
+					Debug.SendAnimationEvent(PlayerRef, "bashStart")
+				Else
+					Debug.SendAnimationEvent(PlayerRef, "attackStart")
+				EndIf
 				return true
 			ElseIf isDefensiveSpell ;&& !isBlocking
-				If !PlayerRef.GetAnimationVariableBool("IsBlocking")
+				If equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")
 					isBlocking = true
 					Debug.SendAnimationEvent(PlayerRef, "blockStart")
 					return true
-				Else
+				ElseIf equippedType != EQUIPPED_RANGED || (bowDrawn || PlayerRef.GetAnimationVariableBool("bBowDrawn"))
 					CastSpell()
 					return true
 				EndIf
 			EndIf
-		ElseIf PlayerRef.GetAnimationVariableBool("IsBlocking") && isDefensiveSpell
+		ElseIf isDefensiveSpell && (PlayerRef.GetAnimationVariableBool("IsBlocking") || PlayerRef.GetAnimationVariableBool("bBowDrawn"))
 			CastSpell()
 			return true
 		EndIf
@@ -1002,11 +1026,11 @@ State Charged
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
 		;Log("Charged["+chargedState+"]: OnAnimationEvent(akSource = " + akSource + ", asEventName = " + asEventName)
 		If spellIsHostile ;|| spellTarget != 0
-			If asEventName == "HitFrame" || asEventName == "arrowRelease"
+			If asEventName == "HitFrame" || asEventName == "BowRelease"
 				CastSpell()
 			ElseIf asEventName == "attackStop"
 				isAttacking = false
-				If spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged
+				If spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged && !Input.IsKeyPressed(keyCodeInterruptCast)
 					;Log("Charged["+chargedState+"]: OnAnimationEvent() - attackStop => Is Concentration. Go to Normal")
 					GoToState("Normal")
 				EndIf
@@ -1017,12 +1041,17 @@ State Charged
 			If asEventName == "blockStart" || asEventName == "blockStartOut"
 				;isBlocking = true
 				CastSpell()
+			ElseIf asEventName == "bowDrawStart"
+				bowDrawn = True
+				CastSpell()
 			ElseIf asEventName == "blockStop"
 				isBlocking = false
 				; If spellCastingType == CASTINGTYPE_CONCENTRATION && GetState() == "Charged" ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
 				; 	Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
 				; 	GoToState("Normal")
 				; EndIf
+			ElseIf asEventName == "bowEnd"
+				bowDrawn = False
 			EndIf
 		EndIf
 	EndEvent
@@ -1034,10 +1063,18 @@ State Charged
 				bool isDefensiveSpell = !spellIsHostile ;&& spellTarget == 0
 				If !isAttacking && !isDefensiveSpell
 					isAttacking = true
-					Debug.SendAnimationEvent(PlayerRef, "attackStart")
+					If equippedType == EQUIPPED_RANGED
+						Debug.SendAnimationEvent(PlayerRef, "bashStart")
+					Else
+						Debug.SendAnimationEvent(PlayerRef, "attackStart")
+					EndIf
 				ElseIf !isBlocking && isDefensiveSpell
 					isBlocking = true
-					Debug.SendAnimationEvent(PlayerRef, "blockStart")
+					If equippedType == EQUIPPED_RANGED
+						Debug.SendAnimationEvent(PlayerRef, "bowDraw")
+					Else
+						Debug.SendAnimationEvent(PlayerRef, "blockStart")
+					EndIf
 				EndIf
 			ElseIf spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged
 				;Log("Charged["+chargedState+"]: OnKeyUp() - keyCode == keyCodeInterruptCast AND Is Concentration. Go to Normal")
@@ -1131,7 +1168,7 @@ State Charged
 	EndFunction
 
 	Event OnUpdate()
-		;Log("Charged["+chargedState+"]: OnUpdate(), Conc Casting Fix=" + Config.ConcentrationCastingFix + ", chargedSpell="+chargedSpell+", castingType="+spellCastingType+", spellTarget="+spellTarget+", ReleaseMode="+chargedReleaseMode)
+		;Log("Charged["+chargedState+"]: OnUpdate(), Conc Casting Fix=" + ConcentrationCastingFix + ", chargedSpell="+chargedSpell+", castingType="+spellCastingType+", spellTarget="+spellTarget+", ReleaseMode="+chargedReleaseMode)
 		Spell spellToCast = chargedSpell
 		If spellToCast != None && spellCastingType == CASTINGTYPE_CONCENTRATION
 			If !Input.IsKeyPressed(keyCodeInterruptCast) && chargedReleaseMode != RELEASEMODE_MANUAL && isCharged
@@ -1142,13 +1179,19 @@ State Charged
 
 			bool attackBound = spellIsHostile ;|| spellTarget != 0
 			If attackBound && chargedReleaseMode != RELEASEMODE_MANUAL
-				Debug.SendAnimationEvent(PlayerRef, "attackStart")
+				If equippedType == EQUIPPED_RANGED
+					Debug.SendAnimationEvent(PlayerRef, "bashStart")
+				Else
+					Debug.SendAnimationEvent(PlayerRef, "attackStart")
+				EndIf
 			EndIf
 
-			If !attackBound && !PlayerRef.GetAnimationVariableBool("IsBlocking") && isCharged
-				;Log("Charged["+chargedState+"]: OnUpdate() Not Blocking. Go to Normal")
-				GoToState("Normal")
-				return
+			If !attackBound && isCharged
+				;Log("Charged["+chargedState+"]: OnUpdate() - bBowDrawn = " + PlayerRef.GetAnimationVariableBool("bBowDrawn"))
+				If (equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && !PlayerRef.GetAnimationVariableBool("bBowDrawn") && !bowDrawn)
+					GoToState("Normal")
+					return
+				EndIf
 			EndIf
 
 			;Log("Charged: OnUpdate() -> RegisterForSingleUpdate")
@@ -1224,6 +1267,7 @@ State Charged
 			concentrationInstanceId = 0
 		EndIf
 
+		bowDrawn = false
 		releaseSound = None
 		concentrationSound = None
 		safetyEnabled = false
