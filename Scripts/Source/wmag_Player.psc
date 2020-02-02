@@ -68,7 +68,7 @@ State Jumping
 		;If keyCode == leftAttackKey || keyCode == rightAttackKey
 			If PlayerRef.GetAnimationVariableBool("bInJumpState")
 				Debug.SendAnimationEvent(PlayerRef, "JumpLandEnd")
-				PlayerRef.SetAnimationVariableBool("bInJumpState", false)
+				;PlayerRef.SetAnimationVariableBool("bInJumpState", false)
 			EndIf
 		;EndIf
 	EndEvent

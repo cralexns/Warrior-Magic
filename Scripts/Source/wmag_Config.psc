@@ -242,6 +242,7 @@ EndFunction
 
 Event OnPageReset(string page)
 	Main.Log("OnPageReset("+page+") - Enter")
+
 	If page == Pages[0] || !Enabled || page == ""
 		SetCursorFillMode(LEFT_TO_RIGHT)
 		AddToggleOptionST("ToggleMod", "$Mod Enabled", Enabled)
@@ -269,7 +270,7 @@ Event OnPageReset(string page)
 
 		SetCursorPosition(4)
 		AddToggleOptionST("DisableChargeAnimationToggle", "$WMAG_DISCHARGEANIM", Main.DisableChargeAnimation)
-		AddToggleOptionST("ConcentrationCastingFixToggle", "$WMAG_CONCCASTFIX", Main.ConcentrationCastingFix)
+		;AddToggleOptionST("ConcentrationCastingFixToggle", "$WMAG_CONCCASTFIX", Main.ConcentrationCastingFix, IsOptionDisabled(true))
 		AddSliderOptionST("MaximumDurationModSlider", "$WMAG_DUREXTMAX", Main.MaximumDurationModifier, timesFormat)
 		AddKeyMapOptionST("DispelKeyModifierKeyMap", "$WMAG_DISPKEYMOD", Main.DispelKeyModifier)
 

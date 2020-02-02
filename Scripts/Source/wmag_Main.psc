@@ -70,7 +70,7 @@ int[] validRangedTypes
 /;
 
 Event OnInit()
-	Version = 0.98
+	Version = 1.0
 	validMeleeTypes = StringToIntArray("1,2,3,4,5,6", ",")
 	validRangedTypes = StringToIntArray("7,12", ",")
 
@@ -151,7 +151,7 @@ Event OnPlayerLoadGame()
 	If Version < 0.98
 		string oldVersion = StringUtil.Substring(Version as string, 0, StringUtil.Find(Version as string, ".")+3)
 		OnInit()
-		Log("Upgraded from "+oldVersion+" to 0.98 - enjoy bow/crossbow support!", LogLevel_Notification)
+		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
 	EndIf
 
 	RegisterEvents()
@@ -168,6 +168,8 @@ Event OnPlayerLoadGame()
 
 	If GetState() != "Normal"
 		Reset()
+	Else
+		ValidateEquipped()
 	EndIf
 
 	; ; DEBUGGING -- ! REMOVE ME !
@@ -507,7 +509,7 @@ Event OnKeyDown(int keyCode)
 
 	float inputRegistrated = Utility.GetCurrentRealTime()
 	If StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode) >= 0
-		If GetState() != "Charging" && !Utility.IsInMenuMode()
+		If GetState() != "Charging" && !Utility.IsInMenuMode() && Game.IsFightingControlsEnabled()
 			If isBusy
 				Log("Attempted to start charging a spell but input isn't ready, aborting..", LogSeverity_Debug)
 				return
@@ -533,7 +535,6 @@ Event OnKeyUp(int keyCode, float holdTime)
 EndEvent
 
 bool isCasting
-bool isSafetyRunning
 Spell safetySpell
 Event OnCastStart(Actor akCaster, Actor akTarget)
 	;Log("OnCastStart()")
@@ -627,7 +628,7 @@ State Normal
 
 		If !latencyCheck
 			latencyCheck = true
-			float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName), LatencyMaintenance(ChargedDoneLatencyName)) * 1000
+			float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName, 10), LatencyMaintenance(ChargedDoneLatencyName, 10)) * 1000
 			If highestAvgLatency >= HighLatencyThreshold && !highLatency
 				highLatency = true
 				Log("High latency detected ("+highLatency+"), skipping all non-essentials!", LogSeverity_Debug)
@@ -949,8 +950,8 @@ State Charged
 			readyInstanceId = 0
 		EndIf
 
-		If chargedSpell == None
-			Log("Charged["+chargedState+"]: OnBeginState() chargedSpell == None. Abort", LogSeverity_Debug)
+		If chargedSpell == None || equippedType == EQUIPPED_INVALID
+			Log("Charged["+chargedState+"]: OnBeginState() chargedSpell == NONE ("+chargedSpell+") OR equippedType == EQUIPPED_INVALID/0 ("+equippedType+"). Abort", LogSeverity_Debug)
 			chargedState = -1
 			isBusy = false
 			GoToState("Normal")
@@ -1129,6 +1130,7 @@ State Charged
 		chargedState = 4
 
 		spellToCast.Cast(PlayerRef)
+		isCasting = true
 
 		If spellCastingType == CASTINGTYPE_CONCENTRATION
 			If concentrationSound != None && concentrationInstanceId == 0
@@ -1191,29 +1193,45 @@ State Charged
 				If (equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && !PlayerRef.GetAnimationVariableBool("bBowDrawn") && !bowDrawn)
 					GoToState("Normal")
 					return
+				ElseIf isCasting && isCharged && spellCastingType == CASTINGTYPE_CONCENTRATION
+					If PlayerRef.GetActorValue("Magicka") > 0
+						spellToCast.Cast(PlayerRef)
+					Else
+						GoToState("Normal")
+						return
+					EndIf
 				EndIf
 			EndIf
 
 			;Log("Charged: OnUpdate() -> RegisterForSingleUpdate")
 			RegisterForSingleUpdate(0.25)
 
-			If ConcentrationCastingFix && !attackBound
-				If !safetyEnabled
-					safetyEnabled = true
-					;Log("Charged: OnUpdate() Safety Initiated.. State = " + GetState())
-					While GetState() == "Charged" && isCharged && safetyEnabled
-						;Log("Charged: OnUpdate() Safety -> Cast Spell = " + chargedSpell)
-						spellToCast.Cast(PlayerRef)
-						Utility.Wait(0.1)
-					EndWhile
-					safetyEnabled = false
-				EndIf
-			EndIf
+			; If ConcentrationCastingFix && !attackBound
+			; 	If !safetyEnabled
+			; 		safetyEnabled = true
+			; 		;Log("Charged: OnUpdate() Safety Initiated.. State = " + GetState())
+			; 		While GetState() == "Charged" && isCharged && safetyEnabled
+			; 			;Log("Charged: OnUpdate() Safety -> Cast Spell = " + chargedSpell)
+			; 			spellToCast.Cast(PlayerRef)
+			; 			Utility.Wait(0.1)
+			; 		EndWhile
+			; 		safetyEnabled = false
+			; 	EndIf
+			; EndIf
+		EndIf
+	EndEvent
+
+	Event OnCastEnd(Actor akCaster, Actor akTarget)
+		;Log("Charged["+chargedState+"]: OnCastEnd(), chargedSpell = " + chargedSpell + ", isCasting="+isCasting+", isCharged="+isCharged+", spellCastingType="+spellCastingType)
+		If GetState() == "Charged"
+			UnregisterForUpdate()
+			OnUpdate()
 		EndIf
 	EndEvent
 
 	Event OnEndState()
 		isCharged = false
+		isCasting = false
 		;Log("Charged["+chargedState+"]: OnEndState(), concentrationInstanceId = " + concentrationInstanceId)
 
 		If chargedState == -1
