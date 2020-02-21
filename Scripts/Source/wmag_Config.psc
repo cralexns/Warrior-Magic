@@ -10,7 +10,7 @@ EndProperty
 bool Property IsModStarting Auto Hidden
 
 int Function GetVersion()
-	return 8
+	return 9
 EndFunction
 
 ;; REMOVE THESE
@@ -75,10 +75,11 @@ Event OnConfigInit()
 	
 	ModName = Main.ModName
 
-	chargeModes = new string[3]
+	chargeModes = new string[4]
 	chargeModes[0] = "$Instant"
 	chargeModes[1] = "$Cast Time"
 	chargeModes[2] = "$Magicka Cost"
+	chargeModes[3] = "$Overcharge"
 
 	releaseModes = new string[3]
 	releaseModes[0] = "$Manual"
@@ -265,7 +266,7 @@ Event OnPageReset(string page)
 
 		SetCursorFillMode(TOP_TO_BOTTOM)
 		SetCursorPosition(3)
-		AddTextOptionST("LatencyText", "$WMAG_LAT", (averageAutoCast * 1000) as int+" ms (+" + (averageQueue * 1000) as int + "ms)")
+		AddTextOptionST("LatencyText", "$WMAG_LAT", (averageQueue * 1000) as int+" ms (+" + (averageAutoCast * 1000) as int + "ms)")
 		AddToggleOptionST("SkipNonEssentialsToggle", "$WMAG_SKIPNONESSENTIALS", Main.SkipNonEssentialsForPerformance)
 
 		SetCursorPosition(4)
@@ -273,6 +274,7 @@ Event OnPageReset(string page)
 		;AddToggleOptionST("ConcentrationCastingFixToggle", "$WMAG_CONCCASTFIX", Main.ConcentrationCastingFix, IsOptionDisabled(true))
 		AddSliderOptionST("MaximumDurationModSlider", "$WMAG_DUREXTMAX", Main.MaximumDurationModifier, timesFormat)
 		AddKeyMapOptionST("DispelKeyModifierKeyMap", "$WMAG_DISPKEYMOD", Main.DispelKeyModifier)
+		AddToggleOptionST("AutonomousChargingToggle", "$WMAG_AUTONOMOUSCHARGING", Main.AutonomousCharging)
 
 		SetCursorPosition(9)
 		AddToggleOptionST("JumpAttackToggle", "$WMAG_JUMPATTACK", EnableJumpAttackHack)
@@ -1071,5 +1073,16 @@ State EnableOverride
 
 	Event OnHighlightST()
 		SetInfoText("$WMAG_ENABLEOVERRIDE_INFO")
+	EndEvent
+EndState
+
+State AutonomousChargingToggle
+	Event OnSelectST()
+		Main.AutonomousCharging = !Main.AutonomousCharging
+		SetToggleOptionValueST(Main.AutonomousCharging)
+	EndEvent
+
+	Event OnHighlightST()
+		SetInfoText("$WMAG_AUTONOMOUSCHARGING_INFO")
 	EndEvent
 EndState

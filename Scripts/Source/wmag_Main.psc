@@ -42,6 +42,7 @@ int Property RELEASEMODE_AUTOMATIC = 2 Auto
 int Property SPELLCHARGE_NONE = 0 Auto Hidden ;No spell charging - everything charges instantly.
 int Property SPELLCHARGE_SPELLBASED = 1 Auto Hidden ;Spell charge time is based on the cast time of the spell.
 int Property SPELLCHARGE_MAXMAGIC = 2 Auto Hidden ;Spell charge time is based on the amount of magicka required versus magicka pool
+int Property SPELLCHARGE_OVERCHARGE = 3 Auto Hidden ;Derived from Spellbased, allow spell to be overcharged up to x2 but costs also increase.
 
 int[] Property SpellReleaseMode Auto
 int[] Property SpellChargeMode Auto
@@ -53,6 +54,8 @@ float Property MaximumMagnitudeModifier = 1.5 Auto
 
 int Property DispelKeyModifier = 56 Auto
 
+bool Property AutonomousCharging = false Auto
+
 string Property KeyBindingIndexName = "KeyBindingIndex" Auto Hidden ; TODO: Add cycle spells to keybindings.
 
 string Property ChargedBeginLatencyName = "Latency1" Auto
@@ -61,11 +64,14 @@ string Property ChargedDoneLatencyName = "Latency2" Auto
 bool Property SkipNonEssentialsForPerformance = false Auto
 float Property HighLatencyThreshold = 200.0 Auto
 
+float Property MaximumOverchargeModifier = 2.0 Auto
+
 int[] validMeleeTypes
 int[] validRangedTypes
 
 ;/
 	TODO:
+	1. Rework overcharge to overcharge in Charged state (but first examine why modding the magnitude does little for the damage?)
 	2. Consider adding support for modifiers in keybindings.
 /;
 
@@ -153,6 +159,8 @@ Event OnPlayerLoadGame()
 		OnInit()
 		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
 	EndIf
+
+	chargingInterval = 0.05
 
 	RegisterEvents()
 	RegisterKeys()
@@ -507,7 +515,7 @@ float inputRegistrationTime
 Event OnKeyDown(int keyCode)
 	;Log("OnKeyDown="+keyCode + ", state=" + GetState())
 
-	float inputRegistrated = Utility.GetCurrentRealTime()
+	float inputRegistered = Utility.GetCurrentRealTime()
 	If StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode) >= 0
 		If GetState() != "Charging" && !Utility.IsInMenuMode() && Game.IsFightingControlsEnabled()
 			If isBusy
@@ -525,7 +533,7 @@ Event OnKeyDown(int keyCode)
 			EndIf
 
 			chargeKeyCodeDown = keyCode
-			inputRegistrationTime = inputRegistrated
+			inputRegistrationTime = inputRegistered
 			GoToState("Charging")
 		EndIf
 	EndIf
@@ -686,6 +694,7 @@ bool isBusy
 bool weaponsDrawn
 bool isBlocking
 bool isAttacking
+bool setChargedLock
 State Charging
 	Event OnBeginState()
 		;Log("Charging: OnBeginState(), chargeKeyCodeDown = " + chargeKeyCodeDown)
@@ -735,7 +744,7 @@ State Charging
 			float effectiveCost = chargingSpell.GetEffectiveMagickaCost(PlayerRef)
 			float castTime = chargingSpell.GetCastTime()
 
-			If chargeMode == SPELLCHARGE_SPELLBASED
+			If chargeMode == SPELLCHARGE_SPELLBASED || chargeMode == SPELLCHARGE_OVERCHARGE
 				chargeTimeRequired = castTime
 			ElseIf chargeMode == SPELLCHARGE_MAXMAGIC
 				float minChargeTime = MinimumChargeTime[isOffensiveSpell as int]
@@ -755,7 +764,7 @@ State Charging
 			chargingSpellCost = 0
 		EndIf
 
-		inputRegistrationTime += chargeTimeRequired
+		;inputRegistrationTime += chargeTimeRequired
 
 		If chargingSpellCost > PlayerRef.GetActorValue("Magicka")
 			;Log("Insufficient magicka to charge spell: " + chargingSpell.GetName() + ", required magicka = " + chargingSpellCost, LogSeverity_Info)
@@ -799,9 +808,9 @@ State Charging
 		Else
 			;; Take Magicka instantly.
 			If chargingSpellCostPaid < chargingSpellCost
-				float ownedMagicka = chargingSpellCost-chargingSpellCostPaid
-				PlayerRef.DamageActorValue("Magicka", ownedMagicka)
-				chargingSpellCostPaid += ownedMagicka
+				float owedMagicka = chargingSpellCost-chargingSpellCostPaid
+				PlayerRef.DamageActorValue("Magicka", owedMagicka)
+				chargingSpellCostPaid += owedMagicka
 			EndIf
 			SetCharged(true)
 		EndIf
@@ -809,25 +818,32 @@ State Charging
 
 	Event OnUpdate()
 		float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
-		If !Input.IsKeyPressed(chargeKeyCodeDown)
+		If (!Input.IsKeyPressed(chargeKeyCodeDown) && !AutonomousCharging)
 			return
 		EndIf
 		;Log("Time Spent Charging = " + timeSpent + ", vs chargeTimeRequired = " + chargeTimeRequired)
 		
-		If chargingSpellCostPaid < chargingSpellCost
-			If timeSpent > chargeTimeRequired
-				inputRegistrationTime += (timeSpent - chargeTimeRequired)
-				timeSpent = chargeTimeRequired
+		float chargeTimeMaximum = chargeTimeRequired
+		float chargingSpellCostMaximum = chargingSpellCost
+
+		If chargeMode == SPELLCHARGE_OVERCHARGE
+			chargeTimeMaximum = chargeTimeRequired * MaximumOverchargeModifier
+			chargingSpellCostMaximum = chargingSpellCost * MaximumOverchargeModifier
+		EndIf
+
+		If chargingSpellCostPaid < chargingSpellCostMaximum
+			If timeSpent > chargeTimeMaximum
+				timeSpent = chargeTimeMaximum
 			EndIf
 
-			float deduction = (chargingSpellCost * (timeSpent / chargeTimeRequired)) - chargingSpellCostPaid ;chargingSpellCost / (chargeTimeRequired / chargingInterval)
+			float deduction = (chargingSpellCostMaximum * (timeSpent / chargeTimeMaximum)) - chargingSpellCostPaid ;chargingSpellCost / (chargeTimeRequired / chargingInterval)
 			PlayerRef.DamageActorValue("Magicka", deduction)
 			chargingSpellCostPaid += deduction
 			;Log("Magicka reduced by " + deduction + ", total deduction = " + chargingSpellCostPaid + ", current magicka = " + PlayerRef.GetActorValue("Magicka"))
 		EndIf
 
-		If (timeSpent >= chargeTimeRequired)
-			SetCharged(true)
+		If timeSpent >= chargeTimeMaximum
+			SetCharged(true, (timeSpent / (chargeTimeRequired * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
 		ElseIf GetState() == "Charging"
 			RegisterForSingleUpdate(chargingInterval)
 		EndIf
@@ -835,22 +851,48 @@ State Charging
 
 	Event OnKeyUp(int keyCode, float holdTime)
 		;Log("Charging: OnKeyUp=" + keyCode + ", chargeTimeRequired="+chargeTimeRequired)
-		If keyCode == chargeKeyCodeDown && chargeTimeRequired > 0
+		If keyCode == chargeKeyCodeDown && chargeTimeRequired > 0 && !AutonomousCharging
 			UnregisterForUpdate()
 
 			float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
 			
-			float remainingCost = chargingSpellCost - chargingSpellCostPaid
+			float spellCost = chargingSpellCost
+			float maxChargeTime = chargeTimeRequired
+			If chargemode == SPELLCHARGE_OVERCHARGE
+				maxChargeTime = chargeTimeRequired * MaximumOverchargeModifier
+				spellCost = (chargingSpellCost * MaximumOverchargeModifier) * (timeSpent / maxChargeTime)
+			EndIf
+
+			float remainingCost = spellCost - chargingSpellCostPaid
+
 			chargingSuccess = (chargeMode == SPELLCHARGE_NONE || timeSpent >= chargeTimeRequired) && remainingCost < PlayerRef.GetActorValue("Magicka")
-			If (chargingSuccess && chargingSpellCostPaid < chargingSpellCost)
+
+			;Log("Charging: OnKeyUp > Success="+chargingSuccess+", spellCost="+spellCost+", timeSpent="+timeSpent+", remainingCost="+remainingCost)
+
+			If (chargingSuccess && chargingSpellCostPaid < spellCost)
 				PlayerRef.DamageActorValue("Magicka", remainingCost)
 				chargingSpellCostPaid += remainingCost
 			EndIf
-			SetCharged(chargingSuccess)
+
+			
+			If timeSpent > maxChargeTime
+				timeSpent = maxChargeTime
+			EndIf
+
+			SetCharged(chargingSuccess, (timeSpent / maxChargeTime) * MaximumOverchargeModifier)
 		EndIf
 	EndEvent
 
-	Function SetCharged(bool isChargeSuccess)
+	Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
+		If setChargedLock
+			Log("Charging: Call to SetCharged() aborted because the function is locked.")
+			Return
+		EndIf
+
+		setChargedLock = true
+		inputRegistrationTime += Utility.GetCurrentRealTime() - chargeStartTime
+		UnregisterForUpdate()
+
 		chargingSuccess = isChargeSuccess
 		If isChargeSuccess
 			If Input.IsKeyPressed(chargeKeyCodeDown) || chargedReleaseMode == RELEASEMODE_KEYUP 
@@ -861,6 +903,7 @@ State Charging
 			spellTarget = chargingSpellTarget
 			spellIsHostile = chargingSpellIsHostile
 			chargedSpell = chargingSpell
+			spellOvercharge = overCharge
 
 			;Log("SetCharged = true -> goto Charged")
 			GoToState("Charged")
@@ -868,10 +911,13 @@ State Charging
 			;Log("SetCharged = false -> goto Normal")
 			GoToState("Normal")
 		EndIf
+		setChargedLock = false
 	EndFunction
 
 	Event OnKeyDown(int keyCode)
-		; We're not registering any inputs while charging, gotta cancel charging first.
+		If AutonomousCharging && keyCode == chargeKeyCodeDown
+			SetCharged(false)
+		EndIf
 	EndEvent
 
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
@@ -923,6 +969,7 @@ Spell chargedSpell
 bool spellIsHostile
 int spellTarget
 int spellCastingType
+float spellOvercharge
 Sound releaseSound
 Sound concentrationSound
 int concentrationInstanceId
@@ -984,6 +1031,11 @@ State Charged
 
 			releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
 			concentrationSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
+		EndIf
+
+		If MaximumDurationModifier > 0 || spellOvercharge > 0.0
+			ModSpellsDuration.Revert()
+			ModSpellsMagnitude.Revert()
 		EndIf
 
 		float chargedDoneTime = Utility.GetCurrentRealTime()
@@ -1115,10 +1167,15 @@ State Charged
 				ModSpellsDuration.AddForm(spellToCast)
 				PlayerRef.SetActorValue("Variable05", modAmount)
 
-				Log(chargingSpell.GetName() + " duration X" + modAmount, LogLevel_Notification)
+				Log(spellToCast.GetName() + " duration X" + modAmount, LogLevel_Notification)
 			Else
 				StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
 			EndIf
+		ElseIf spellOvercharge > 1.0
+			ModSpellsMagnitude.AddForm(spellToCast)
+			PlayerRef.SetActorValue("Variable05", spellOvercharge)
+
+			Log(spellToCast.GetName() + " Magnitude X"+spellOvercharge, LogLevel_Notification)
 		EndIf
 
 		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
@@ -1240,11 +1297,6 @@ State Charged
 
 		isBusy = true
 
-		If MaximumDurationModifier > 0
-			ModSpellsDuration.Revert()
-			ModSpellsMagnitude.Revert()
-		EndIf
-
 		float timeout = 0.35
 		While timeout > 0.0 && (chargedState != 2 && chargedState != 4)
 			Utility.Wait(0.01)
@@ -1320,7 +1372,7 @@ bool Function AutoCast(bool ignoreHoldingKey = false)
 	return false
 EndFunction
 
-Function SetCharged(bool isChargeSuccess)
+Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
 EndFunction
 
 ;/  ----
