@@ -76,7 +76,7 @@ int[] validRangedTypes
 /;
 
 Event OnInit()
-	Version = 1.0
+	Version = 1.2
 	validMeleeTypes = StringToIntArray("1,2,3,4,5,6", ",")
 	validRangedTypes = StringToIntArray("7,12", ",")
 
@@ -158,6 +158,9 @@ Event OnPlayerLoadGame()
 		string oldVersion = StringUtil.Substring(Version as string, 0, StringUtil.Find(Version as string, ".")+3)
 		OnInit()
 		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
+	ElseIf Version == 1.1
+		Version = 1.2
+		Log("Upgraded from 1.1 to 1.2 - removed charged effect from conc and autocast spells and fixed spell release sound not playing!", LogLevel_MessageBox)
 	EndIf
 
 	chargingInterval = 0.05
@@ -1012,20 +1015,25 @@ State Charged
 			StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
 		EndIf
 
-		If !SkipNonEssentialsForPerformance || !highLatency
-			chargedShader = StorageUtil.GetFormValue(chargedSpell, "WMAG_CACHE_SHADER") as EffectShader
-			If chargedShader == None
-				chargedShader = GetEffectShaderForMGEF(mEffect)
-				StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_SHADER", chargedShader)
-			EndIf
+		bool skipChargedShader = spellCastingType == CASTINGTYPE_CONCENTRATION || (chargedReleaseMode == RELEASEMODE_AUTOMATIC || (chargedReleaseMode == RELEASEMODE_KEYUP && (!Input.IsKeyPressed(keyCodeInterruptCast))))
 
-			If chargedShader != None
-				chargedShader.Play(PlayerRef)
+		If !SkipNonEssentialsForPerformance || !highLatency
+			If !skipChargedShader
+				chargedShader = StorageUtil.GetFormValue(chargedSpell, "WMAG_CACHE_SHADER") as EffectShader
+				If chargedShader == None
+					chargedShader = GetEffectShaderForMGEF(mEffect)
+					StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_SHADER", chargedShader)
+				EndIf
+
+				If chargedShader != None
+					chargedShader.Play(PlayerRef)
+				EndIf
 			EndIf
 
 			readySound = GetSoundEffectFor(mEffect, SOUNDEFFECT_READY)
 			If readySound != None
 				readyInstanceId = readySound.Play(PlayerRef)
+				;Log("Playing sound " + readySound + ", id = " + readyInstanceId + " on: " + PlayerRef)
 				Sound.SetInstanceVolume(readyInstanceId, 1.0)
 			EndIf
 
@@ -1180,8 +1188,9 @@ State Charged
 
 		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
 			int releaseInstanceId = releaseSound.Play(PlayerRef)
+			;Log("Playing sound " + releaseSound + ", id = " + releaseInstanceId + " on: " + PlayerRef)
 			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
-			Sound.StopInstance(releaseInstanceId)
+			;Sound.StopInstance(releaseInstanceId)
 		EndIf
 
 		chargedState = 4
