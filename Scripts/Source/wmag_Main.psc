@@ -76,7 +76,7 @@ int[] validRangedTypes
 /;
 
 Event OnInit()
-	Version = 1.2
+	Version = 1.25
 	validMeleeTypes = StringToIntArray("1,2,3,4,5,6", ",")
 	validRangedTypes = StringToIntArray("7,12", ",")
 
@@ -158,9 +158,11 @@ Event OnPlayerLoadGame()
 		string oldVersion = StringUtil.Substring(Version as string, 0, StringUtil.Find(Version as string, ".")+3)
 		OnInit()
 		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
-	ElseIf Version == 1.1
-		Version = 1.2
-		Log("Upgraded from 1.1 to 1.2 - removed charged effect from conc and autocast spells and fixed spell release sound not playing!", LogLevel_MessageBox)
+	EndIf
+
+	If Version <= 1.2
+		Version = 1.25
+		Log("Upgraded to version 1.25", LogLevel_Notification)
 	EndIf
 
 	chargingInterval = 0.05
@@ -190,8 +192,8 @@ Event OnPlayerLoadGame()
 	; 	idx += 1
 	; EndWhile
 
-	StorageUtil.IntListClear(self, ChargedBeginLatencyName)
-	StorageUtil.IntListClear(self, ChargedDoneLatencyName)
+	StorageUtil.FloatListClear(self, ChargedBeginLatencyName)
+	StorageUtil.FloatListClear(self, ChargedDoneLatencyName)
 EndEvent
 
 Function RegisterEvents()
@@ -769,9 +771,11 @@ State Charging
 
 		;inputRegistrationTime += chargeTimeRequired
 
-		If chargingSpellCost > PlayerRef.GetActorValue("Magicka")
+		float missingMagicka = chargingSpellCost - PlayerRef.GetActorValue("Magicka")
+		If missingMagicka > 0
 			;Log("Insufficient magicka to charge spell: " + chargingSpell.GetName() + ", required magicka = " + chargingSpellCost, LogSeverity_Info)
-			Log("You don't have enough magicka to charge " + chargingSpell.GetName(), LogLevel_Notification)
+
+			Log("You lack "+Math.ceiling(missingMagicka)+" magicka to charge " + chargingSpell.GetName() + " ("+chargingSpellCost as int+")", LogLevel_Notification)
 			UI.Invoke("HUD Menu", "_root.HUDMovieBaseInstance.StartMagickaBlinking")
 			;UI.InvokeString("HUD Menu", "_root.HUDMovieBaseInstance.ShowSubtitle", "Not enough magicka")
 			GoToState("Normal")
@@ -794,10 +798,10 @@ State Charging
 		If chargeTimeRequired > 0
 			If !SkipNonEssentialsForPerformance || !highLatency
 				Sound chargingSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CHARGE)
-				If !isBlocking && !DisableChargeAnimation
-					Debug.SendAnimationEvent(PlayerRef, "IdleCombatWeaponCheckStart")
-					cancelIdle = true
-				EndIf
+				; If !isBlocking && !DisableChargeAnimation
+				; 	Debug.SendAnimationEvent(PlayerRef, "IdleCombatWeaponCheckStart")
+				; 	cancelIdle = true
+				; EndIf
 
 				
 				If chargingSound != None
@@ -828,25 +832,45 @@ State Charging
 		
 		float chargeTimeMaximum = chargeTimeRequired
 		float chargingSpellCostMaximum = chargingSpellCost
+		float overchargeTime = chargeTimeRequired ; * ((MaximumOverchargeModifier*2) / (MaximumOverchargeModifier+0.5))
 
 		If chargeMode == SPELLCHARGE_OVERCHARGE
-			chargeTimeMaximum = chargeTimeRequired * MaximumOverchargeModifier
+			chargeTimeMaximum = chargeTimeRequired + overchargeTime
 			chargingSpellCostMaximum = chargingSpellCost * MaximumOverchargeModifier
 		EndIf
 
+		If timeSpent > chargeTimeMaximum
+			timeSpent = chargeTimeMaximum
+		EndIf
+		
+		bool endCharging = false
 		If chargingSpellCostPaid < chargingSpellCostMaximum
-			If timeSpent > chargeTimeMaximum
-				timeSpent = chargeTimeMaximum
+			float deduction = 0
+			If chargingSpellCostPaid < chargingSpellCost
+				deduction = (chargingSpellCost * (timeSpent / chargeTimeRequired)) - chargingSpellCostPaid
+			Else
+				deduction = (chargingSpellCostMaximum * (timeSpent / chargeTimeMaximum)) - chargingSpellCostPaid ;chargingSpellCost / (chargeTimeRequired / chargingInterval)
 			EndIf
 
-			float deduction = (chargingSpellCostMaximum * (timeSpent / chargeTimeMaximum)) - chargingSpellCostPaid ;chargingSpellCost / (chargeTimeRequired / chargingInterval)
+			If deduction + chargingSpellCostPaid > chargingSpellCostMaximum
+				deduction = chargingSpellCostMaximum - chargingSpellCostPaid
+			EndIf
+
+			float currentMagicka = PlayerRef.GetActorValue("Magicka")
+			If deduction > currentMagicka
+				deduction = currentMagicka
+				endCharging = true
+			EndIf
+
 			PlayerRef.DamageActorValue("Magicka", deduction)
 			chargingSpellCostPaid += deduction
-			;Log("Magicka reduced by " + deduction + ", total deduction = " + chargingSpellCostPaid + ", current magicka = " + PlayerRef.GetActorValue("Magicka"))
+			;Log("Magicka reduced by " + deduction + ", total deduction = " + chargingSpellCostPaid + " out of "+chargingSpellCostMaximum+", current magicka = " + PlayerRef.GetActorValue("Magicka"))
 		EndIf
 
-		If timeSpent >= chargeTimeMaximum
-			SetCharged(true, (timeSpent / (chargeTimeRequired * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
+		;Log("OnUpdate.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
+
+		If timeSpent >= chargeTimeMaximum || endCharging
+			SetCharged(chargingSpellCostPaid >= chargingSpellCost, (chargingSpellCostPaid / (chargingSpellCost * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
 		ElseIf GetState() == "Charging"
 			RegisterForSingleUpdate(chargingInterval)
 		EndIf
@@ -859,11 +883,21 @@ State Charging
 
 			float timeSpent = Utility.GetCurrentRealTime() - chargeStartTime
 			
-			float spellCost = chargingSpellCost
 			float maxChargeTime = chargeTimeRequired
+			float overchargeTime = chargeTimeRequired ; * ((MaximumOverchargeModifier*2) / (MaximumOverchargeModifier+0.5))
+			float spellCost = chargingSpellCost
+
 			If chargemode == SPELLCHARGE_OVERCHARGE
-				maxChargeTime = chargeTimeRequired * MaximumOverchargeModifier
-				spellCost = (chargingSpellCost * MaximumOverchargeModifier) * (timeSpent / maxChargeTime)
+				maxChargeTime = chargeTimeRequired + overchargeTime
+				;spellCost = (chargingSpellCost * MaximumOverchargeModifier) * (timeSpent / maxChargeTime)
+			EndIf
+
+			If timeSpent > maxChargeTime
+				timeSpent = maxChargeTime
+			EndIf
+
+			If timeSpent > chargeTimeRequired
+				spellCost = chargingSpellCost + (((chargingSpellCost*MaximumOverchargeModifier)-chargingSpellCost) * ((timeSpent-chargeTimeRequired) / (maxChargeTime - chargeTimeRequired)))
 			EndIf
 
 			float remainingCost = spellCost - chargingSpellCostPaid
@@ -871,25 +905,21 @@ State Charging
 			chargingSuccess = (chargeMode == SPELLCHARGE_NONE || timeSpent >= chargeTimeRequired) && remainingCost < PlayerRef.GetActorValue("Magicka")
 
 			;Log("Charging: OnKeyUp > Success="+chargingSuccess+", spellCost="+spellCost+", timeSpent="+timeSpent+", remainingCost="+remainingCost)
+			;Log("OnKeyUp.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
 
-			If (chargingSuccess && chargingSpellCostPaid < spellCost)
-				PlayerRef.DamageActorValue("Magicka", remainingCost)
-				chargingSpellCostPaid += remainingCost
+			If SetCharged(chargingSuccess, ((chargingSpellCostPaid+remainingCost) / (chargingSpellCost * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
+				If (chargingSuccess && chargingSpellCostPaid < spellCost)
+					PlayerRef.DamageActorValue("Magicka", remainingCost)
+					chargingSpellCostPaid += remainingCost
+				EndIf
 			EndIf
-
-			
-			If timeSpent > maxChargeTime
-				timeSpent = maxChargeTime
-			EndIf
-
-			SetCharged(chargingSuccess, (timeSpent / maxChargeTime) * MaximumOverchargeModifier)
 		EndIf
 	EndEvent
 
-	Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
+	bool Function SetCharged(bool isChargeSuccess, float charge = 0.0)
 		If setChargedLock
-			Log("Charging: Call to SetCharged() aborted because the function is locked.")
-			Return
+			Log("Charging: Call to SetCharged() aborted because the function is locked.", LogSeverity_Debug)
+			Return False
 		EndIf
 
 		setChargedLock = true
@@ -906,7 +936,9 @@ State Charging
 			spellTarget = chargingSpellTarget
 			spellIsHostile = chargingSpellIsHostile
 			chargedSpell = chargingSpell
-			spellOvercharge = overCharge
+
+
+			spellCharge = charge
 
 			;Log("SetCharged = true -> goto Charged")
 			GoToState("Charged")
@@ -915,6 +947,7 @@ State Charging
 			GoToState("Normal")
 		EndIf
 		setChargedLock = false
+		return True
 	EndFunction
 
 	Event OnKeyDown(int keyCode)
@@ -934,9 +967,9 @@ State Charging
 
 	Event OnEndState()
 		;Log("Charging: OnEndState(), chargingSuccess = " + chargingSuccess + ", next state = " + GetState())
-		If cancelIdle
-			PlayerRef.PlayIdle(IdleStop_Loose)
-		EndIf
+		; If cancelIdle
+		; 	PlayerRef.PlayIdle(IdleStop_Loose)
+		; EndIf
 
 		If chargingSoundInstance != 0
 			Sound.StopInstance(chargingSoundInstance)
@@ -958,7 +991,7 @@ State Charging
 		chargingSpellCost = -1
 		chargeTimeRequired = -1
 		chargeMode = -1
-		cancelIdle = false
+		; cancelIdle = false
 
 		If !chargingSuccess
 			isBusy = false
@@ -972,7 +1005,7 @@ Spell chargedSpell
 bool spellIsHostile
 int spellTarget
 int spellCastingType
-float spellOvercharge
+float spellCharge
 Sound releaseSound
 Sound concentrationSound
 int concentrationInstanceId
@@ -983,6 +1016,7 @@ int chargedState
 EffectShader chargedShader
 Sound readySound
 bool bowDrawn
+bool revertSpellMod
 State Charged
 	Event OnBeginState()
 		isCharged = true
@@ -995,10 +1029,10 @@ State Charged
 
 		float chargedBeginTime = Utility.GetCurrentRealTime()
 
-		If readyInstanceId != 0
-			Sound.StopInstance(readyInstanceId)
-			readyInstanceId = 0
-		EndIf
+		; If readyInstanceId != 0
+		; 	Sound.StopInstance(readyInstanceId)
+		; 	readyInstanceId = 0
+		; EndIf
 
 		If chargedSpell == None || equippedType == EQUIPPED_INVALID
 			Log("Charged["+chargedState+"]: OnBeginState() chargedSpell == NONE ("+chargedSpell+") OR equippedType == EQUIPPED_INVALID/0 ("+equippedType+"). Abort", LogSeverity_Debug)
@@ -1041,9 +1075,10 @@ State Charged
 			concentrationSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
 		EndIf
 
-		If MaximumDurationModifier > 0 || spellOvercharge > 0.0
+		If revertSpellMod
 			ModSpellsDuration.Revert()
 			ModSpellsMagnitude.Revert()
+			revertSpellMod = false
 		EndIf
 
 		float chargedDoneTime = Utility.GetCurrentRealTime()
@@ -1176,14 +1211,16 @@ State Charged
 				PlayerRef.SetActorValue("Variable05", modAmount)
 
 				Log(spellToCast.GetName() + " duration X" + modAmount, LogLevel_Notification)
+				revertSpellMod = true
 			Else
 				StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
 			EndIf
-		ElseIf spellOvercharge > 1.0
+		ElseIf spellCharge > 1.0
 			ModSpellsMagnitude.AddForm(spellToCast)
-			PlayerRef.SetActorValue("Variable05", spellOvercharge)
+			PlayerRef.SetActorValue("Variable05", spellCharge)
 
-			Log(spellToCast.GetName() + " Magnitude X"+spellOvercharge, LogLevel_Notification)
+			Log(spellToCast.GetName() + " magnitude X"+spellCharge, LogLevel_Notification)
+			revertSpellMod = true
 		EndIf
 
 		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
@@ -1381,7 +1418,7 @@ bool Function AutoCast(bool ignoreHoldingKey = false)
 	return false
 EndFunction
 
-Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
+bool Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
 EndFunction
 
 ;/  ----

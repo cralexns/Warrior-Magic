@@ -270,7 +270,8 @@ Event OnPageReset(string page)
 		AddToggleOptionST("SkipNonEssentialsToggle", "$WMAG_SKIPNONESSENTIALS", Main.SkipNonEssentialsForPerformance)
 
 		SetCursorPosition(4)
-		AddToggleOptionST("DisableChargeAnimationToggle", "$WMAG_DISCHARGEANIM", Main.DisableChargeAnimation)
+		;AddToggleOptionST("DisableChargeAnimationToggle", "$WMAG_DISCHARGEANIM", Main.DisableChargeAnimation)
+		AddSliderOptionST("MaximumChargeSlider", "$WMAG_CHARGEMAX", Main.MaximumOverchargeModifier, timesFormat)
 		;AddToggleOptionST("ConcentrationCastingFixToggle", "$WMAG_CONCCASTFIX", Main.ConcentrationCastingFix, IsOptionDisabled(true))
 		AddSliderOptionST("MaximumDurationModSlider", "$WMAG_DUREXTMAX", Main.MaximumDurationModifier, timesFormat)
 		AddKeyMapOptionST("DispelKeyModifierKeyMap", "$WMAG_DISPKEYMOD", Main.DispelKeyModifier)
@@ -484,16 +485,18 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 
 	int displayIndex = spellSlotKeyOptionId.Find(option)
 	If option == spellSlotCreateIndex && keyCode != -1
-		Spell defaultSpell = FindFirstUnmappedSpell(keyCode)
-		If defaultSpell
-			Main.BindSpellToKey(keyCode, defaultSpell)
-
-			If enableOverride && StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
-				StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
-				StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
+		bool setOverride = StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
+		
+		If !setOverride || displayIndex == -1
+			Spell defaultSpell = FindFirstUnmappedSpell(keyCode)
+			If defaultSpell
+				Main.BindSpellToKey(keyCode, defaultSpell)
 			EndIf
+		EndIf
 
-			ForcePageReset()
+		If enableOverride && setOverride
+			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
+			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
 		EndIf
 	ElseIf displayIndex != -1
 		int slotIndex = spellSlotIndex[displayIndex]
@@ -510,9 +513,9 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 			Main.Log("Failed to assign existing keybinding on keyIndex="+slotIndex+", aborting..", Main.LogSeverity_Warning)
 			return
 		EndIf
-
-		ForcePageReset()
 	EndIf
+
+	ForcePageReset()
 EndEvent
 
 Event OnOptionSelect(int option)
@@ -600,6 +603,7 @@ Function ClearOverrideMenu(int displayIndex, string suffix)
 EndFunction
 
 Event OnOptionHighlight(int option)
+	Input.GetMappedKey("Ready Weapon")
 	If spellSlotSpellOptionId.Find(option) != -1
 		;; Spell Menu
 		SetInfoText("$WMAG_SPELL_INFO")
@@ -618,41 +622,47 @@ EndEvent
 
 Event OnOptionDefault(int option)
 	If CurrentPage == Pages[1]
-		int kDisplayIndex = spellSlotKeyOptionId.Find(option)
-		int mDisplayIndex = spellSlotSpellOptionId.Find(option)
-		int keyIndex = -1
-		int spellIndex = -1
-		If kDisplayIndex != -1
-			keyIndex = spellSlotIndex[kDisplayIndex]
-		ElseIf mDisplayIndex != -1
-			keyIndex = spellSlotIndex[mDisplayIndex]
-			spellIndex = spellSlotSpellIndex[mDisplayIndex]
-		EndIf
+		ClearSpellSlot(option)
+	EndIf
+EndEvent
 
-		If keyIndex != -1
-			int keyCode = Main.GetKeyCodeByIndex(keyIndex)
-			If keyCode != -1 && Main.UnbindKey(keyCode, spellIndex)
+Function ClearSpellSlot(int option)
+	int kDisplayIndex = spellSlotKeyOptionId.Find(option)
+	int mDisplayIndex = spellSlotSpellOptionId.Find(option)
+	int keyIndex = -1
+	int spellIndex = -1
+	If kDisplayIndex != -1
+		keyIndex = spellSlotIndex[kDisplayIndex]
+	ElseIf mDisplayIndex != -1
+		keyIndex = spellSlotIndex[mDisplayIndex]
+		spellIndex = spellSlotSpellIndex[mDisplayIndex]
+	EndIf
+
+	If keyIndex != -1
+		int keyCode = Main.GetKeyCodeByIndex(keyIndex)
+		If keyCode != -1 && Main.UnbindKey(keyCode, spellIndex)
+			If Main.GetSpellsByKey(keyCode).Length == 0
 				StorageUtil.ClearObjIntValuePrefix(Main, "WMAG_OVERRIDE_"+keyCode+"_")
-				ForcePageReset()
-				return
 			EndIf
-		EndIf
-
-		int chargeDisplayIndex = spellSlotOverrideChargeId.Find(option)
-		If chargeDisplayIndex >= 0
-			ClearOverrideMenu(chargeDisplayIndex, "CHARGE")
-			ForcePageReset()
-			return
-		EndIf
-
-		int releaseDisplayIndex = spellSlotOverrideReleaseId.Find(option)
-		If releaseDisplayIndex >= 0
-			ClearOverrideMenu(releaseDisplayIndex, "RELEASE")
 			ForcePageReset()
 			return
 		EndIf
 	EndIf
-EndEvent
+
+	int chargeDisplayIndex = spellSlotOverrideChargeId.Find(option)
+	If chargeDisplayIndex >= 0
+		ClearOverrideMenu(chargeDisplayIndex, "CHARGE")
+		ForcePageReset()
+		return
+	EndIf
+
+	int releaseDisplayIndex = spellSlotOverrideReleaseId.Find(option)
+	If releaseDisplayIndex >= 0
+		ClearOverrideMenu(releaseDisplayIndex, "RELEASE")
+		ForcePageReset()
+		return
+	EndIf
+EndFunction
 
 Function LoadSpellsInSpellMenu(int displayIndex)
 	If learnedSpellsCached
@@ -683,17 +693,14 @@ Event OnOptionMenuAccept(int option, int index)
 	Main.Log("OnOptionMenuAccept(), page = " + CurrentPage + ", option="+option+", index="+index)
 	If CurrentPage == Pages[1]
 		int displayIndex = spellSlotSpellOptionId.Find(option)
-		If displayIndex >= 0 && index != -1
+		if index == -1
+			ClearSpellSlot(option)
+			ForcePageReset()
+		ElseIf displayIndex >= 0
 			spellMenuDisplayIndex = -1
 			int slotIndex = spellSlotIndex[displayIndex]
 			int spellIndex = spellSlotSpellIndex[displayIndex]
 			int keyCode = Main.GetKeyCodeByIndex(slotIndex)
-			; If index == -1
-			; 	If Main.UnbindKey(keyCode, spellIndex)
-			; 		ForcePageReset()
-			; 	EndIf
-			; 	return
-			; EndIf
 
 			Spell selectedSpell = learnedSpellCache[index] as Spell
 			If selectedSpell && selectedSpell != Main.GetSpellByIndex(slotIndex, spellIndex)
@@ -703,7 +710,7 @@ Event OnOptionMenuAccept(int option, int index)
 					EndIf
 				EndIf
 			EndIf
-			return
+		return
 		EndIf
 
 		int chargeDisplayIndex = spellSlotOverrideChargeId.Find(option)
@@ -1019,20 +1026,35 @@ State EnableSweepingAttacksToggle
 	EndEvent
 EndState
 
-State DisableChargeAnimationToggle
-	Event OnSelectST()
-		Main.DisableChargeAnimation = !Main.DisableChargeAnimation
-		SetToggleOptionValueST(Main.DisableChargeAnimation)
-	EndEvent
+; State DisableChargeAnimationToggle
+; 	Event OnSelectST()
+; 		Main.DisableChargeAnimation = !Main.DisableChargeAnimation
+; 		SetToggleOptionValueST(Main.DisableChargeAnimation)
+; 	EndEvent
 
+; 	Event OnHighlightST()
+; 		SetInfoText("$WMAG_DISCHARGEANIM_INFO")
+; 	EndEvent
+; EndState
+
+State MaximumChargeSlider
+	Event OnSliderOpenST()
+		SetSliderDialogInterval(0.1)
+		SetSliderDialogRange(1, 10.0)
+		SetSliderDialogStartValue(Main.MaximumOverchargeModifier)
+	EndEvent
+	Event OnSliderAcceptST(float value)
+		Main.MaximumOverchargeModifier = value
+		SetSliderOptionValueST(value, timesFormat)
+	EndEvent
 	Event OnHighlightST()
-		SetInfoText("$WMAG_DISCHARGEANIM_INFO")
+		SetInfoText("$WMAG_CHARGEMAX_INFO")
 	EndEvent
 EndState
 
 State MaximumDurationModSlider
 	Event OnSliderOpenST()
-		SetSliderDialogInterval(0.5)
+		SetSliderDialogInterval(0.1)
 		SetSliderDialogRange(0, 10.0)
 		SetSliderDialogStartValue(Main.MaximumDurationModifier)
 	EndEvent
