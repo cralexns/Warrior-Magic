@@ -334,7 +334,7 @@ Function BuildSpellsPage()
 			int keyCode = sortedKeys[idx]
 			int slotIdx = StorageUtil.IntListFind(Main, Main.KeyBindingIndexName, keyCode)
 			;Spell s = StorageUtil.FormListGet(Main, Main.KeyBindingIndexName, slotIdx) as Spell
-			Form[] spells = StorageUtil.FormListToArray(Main, Main.GetKeyNameForIndex(slotIdx))
+			Form[] spells = StorageUtil.FormListToArray(Main, Main.GetKeyNameForKeyCode(keyCode))
 
 			If keyCode > 0 && spells.length > 0
 				int sIdx = 0
@@ -366,6 +366,7 @@ Function BuildSpellsPage()
 							AddEmptyOption()
 						EndIf
 					EndIf
+					;Main.Log("spellSlotIndex["+ssIdx+"] = " + slotIdx + ", spell=" + spells[sIdx].GetName() + ", keyCode="+keyCode)
 					sIdx += 1
 					ssIdx += 1
 				EndWhile
@@ -406,7 +407,6 @@ int Function IsOptionHidden(bool isHidden = true)
 EndFunction
 
 bool Function AbortKeybinding(string conflictControl, string conflictName)
-	bool continue = true
 	if (conflictControl != "")
 		string msg
 		if (conflictName != "")
@@ -421,7 +421,7 @@ bool Function AbortKeybinding(string conflictControl, string conflictName)
 EndFunction
 
 string function GetCustomControl(int keyCode)
-	If Main.GetSpellsByKey(keyCode) == None
+	If Main.GetSpellsByKey(keyCode).length == 0
 		Return ""
 	EndIf
 
@@ -480,22 +480,22 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 		return
 	EndIf
 
-	If AbortKeybinding(conflictControl, conflictName)
+	If conflictName != ModName && AbortKeybinding(conflictControl, conflictName)
 		Return
 	EndIf
 
 	int displayIndex = spellSlotKeyOptionId.Find(option)
 	If option == spellSlotCreateIndex && keyCode != -1
-		bool hasOverride = StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
+		bool setOverride = StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
 		
-		If !hasOverride || !enableOverride || Main.GetSpellsByKey(keyCode).Length == 0
+		If !setOverride || !enableOverride || Main.GetSpellsByKey(keyCode).Length == 0
 			Spell defaultSpell = FindFirstUnmappedSpell(keyCode)
 			If defaultSpell
 				Main.BindSpellToKey(keyCode, defaultSpell)
 			EndIf
 		EndIf
 
-		If enableOverride && hasOverride
+		If enableOverride && setOverride
 			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
 			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
 		EndIf
@@ -639,6 +639,8 @@ Function ClearSpellSlot(int option)
 		spellIndex = spellSlotSpellIndex[mDisplayIndex]
 	EndIf
 
+	;Main.Log("ClearSpellSlot("+option+"), ("+kDisplayIndex+"/"+mDisplayIndex+") keyIndex="+keyIndex+", spellIndex="+spellIndex)
+
 	If keyIndex != -1
 		int keyCode = Main.GetKeyCodeByIndex(keyIndex)
 		If keyCode != -1 && Main.UnbindKey(keyCode, spellIndex)
@@ -691,7 +693,7 @@ Function LoadSpellsInSpellMenu(int displayIndex)
 EndFunction
 
 Event OnOptionMenuAccept(int option, int index)
-	Main.Log("OnOptionMenuAccept(), page = " + CurrentPage + ", option="+option+", index="+index)
+	;Main.Log("OnOptionMenuAccept(), page = " + CurrentPage + ", option="+option+", index="+index)
 	If CurrentPage == Pages[1]
 		int displayIndex = spellSlotSpellOptionId.Find(option)
 		if index == -1

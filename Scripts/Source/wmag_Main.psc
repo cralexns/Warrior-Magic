@@ -162,12 +162,23 @@ Event OnPlayerLoadGame()
 		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
 	EndIf
 
-	If Version <= 1.3
+	If Version < 1.3
+		chargingInterval = 0.05
 		Version = 1.3
+
+		int[] sortedKeys = StorageUtil.IntListToArray(self, KeyBindingIndexName)
+		int idx = 0
+		while (idx < sortedKeys.length)
+			string oldKeyName = GetKeyNameForIndex(idx)
+			Form[] spells = StorageUtil.FormListToArray(self, oldKeyName)
+			StorageUtil.FormListClear(self, oldKeyName)
+
+			StorageUtil.FormListCopy(self, GetKeyNameForKeyCode(sortedKeys[idx]), spells)
+			idx += 1
+		endwhile
+
 		Log("Upgraded to version 1.3\nAdded new charge mode toggle: Spells cast every time you attack/block\nAdded support for unarmed combat.", LogLevel_MessageBox)
 	EndIf
-
-	chargingInterval = 0.05
 
 	RegisterEvents()
 	RegisterKeys()
@@ -250,8 +261,13 @@ EndFunction
 	SPELL BINDING FUNCTIONS	
 /;
 
+;; OBSOLETE
 string Function GetKeyNameForIndex(int keyIndex)
 	return KeyBindingIndexName + "_"+keyIndex+"_Spells"
+EndFunction
+
+string Function GetKeyNameForKeyCode(int keyCode)
+	return KeyBindingIndexName + "_KEYCODE"+keyCode+"_Spells"
 EndFunction
 
 bool Function SetKeyByIndex(int keyIndex, int keyCode)
@@ -266,7 +282,7 @@ bool Function BindSpellToKey(int keyCode, Spell aSpell, int spellIndex = -1)
 		RegisterForKey(keyCode)
 	EndIf
 
-	string keyName = GetKeyNameForIndex(keyIndex)
+	string keyName = GetKeyNameForKeyCode(keyCode)
 	int spellCount = StorageUtil.FormListCount(self, keyName)
 	If spellCount > 1 || (spellCount == 1 && spellIndex != 0)
 		Spell firstSpell = StorageUtil.FormListGet(self, keyName, 0) as Spell
@@ -298,8 +314,9 @@ EndFunction
 bool Function UnbindKey(int keyCode, int spellIndex)
 	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
 	If keyIndex != -1
-		string keyName = GetKeyNameForIndex(keyIndex)
+		string keyName = GetKeyNameForKeyCode(keyCode)
 		int spellCount = StorageUtil.FormListCount(self, keyName)
+		Log("UnbindKey("+keyCode+", "+spellIndex+") => keyName="+keyName+", spellCount="+spellCount+", keyIndex="+keyIndex)
 		If spellCount > 1 && spellIndex != -1 && StorageUtil.FormListRemoveAt(self, keyName, spellIndex)
 			return true
 		ElseIf StorageUtil.IntListRemoveAt(self, KeyBindingIndexName, keyIndex) && StorageUtil.FormListClear(self, keyName)
@@ -310,11 +327,13 @@ bool Function UnbindKey(int keyCode, int spellIndex)
 EndFunction
 
 Spell Function GetSpellByIndex(int keyIndex, int spellIndex)
-	return StorageUtil.FormListGet(self, GetKeyNameForIndex(keyIndex), spellIndex) as Spell
+	int keyCode = GetKeyCodeByIndex(keyIndex)
+	return StorageUtil.FormListGet(self, GetKeyNameForKeyCode(keyCode), spellIndex) as Spell
 EndFunction
 
 Form[] Function GetSpellsByIndex(int keyIndex)
-	return StorageUtil.FormListToArray(self, GetKeyNameForIndex(keyIndex))
+	int keyCode = GetKeyCodeByIndex(keyIndex)
+	return StorageUtil.FormListToArray(self, GetKeyNameForKeyCode(keyCode))
 EndFunction
 
 int Function GetKeyCodeByIndex(int index)
@@ -326,9 +345,9 @@ int Function GetIndexByKeyCode(int keyCode)
 EndFunction
 
 Form[] Function GetSpellsByKey(int keyCode)
-	int keyIndex = GetIndexByKeyCode(keyCode)
-	If keyIndex != -1
-		return StorageUtil.FormListToArray(self, GetKeyNameForIndex(keyIndex))
+	string keyName = GetKeyNameForKeyCode(keyCode)
+	If StorageUtil.FormListCount(self, keyName) > 0
+		return StorageUtil.FormListToArray(self, keyName)
 	EndIf
 	return Utility.CreateFormArray(0)
 EndFunction
@@ -337,7 +356,7 @@ Spell Function GetSpellByKey(int keyCode, bool allowHostile = true, bool usePrev
 	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
 	;Log("GetSpellByKey ("+keyCode+") => " + keyIndex)
 	If keyIndex != -1
-		string keyName = GetKeyNameForIndex(keyIndex)
+		string keyName = GetKeyNameForKeyCode(keyCode)
 		int cycleIndex = StorageUtil.GetIntValue(self, keyName, 0)
 		int maxLength = StorageUtil.FormListCount(self, keyName)
 		If cycleIndex >= maxLength || cycleIndex < 0
@@ -361,11 +380,7 @@ Spell Function GetSpellByKey(int keyCode, bool allowHostile = true, bool usePrev
 EndFunction
 
 int Function ReverseCycleByKey(int keyCode)
-	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
-	If keyIndex != -1
-		return StorageUtil.AdjustIntValue(self, GetKeyNameForIndex(keyIndex), -1)
-	EndIf
-	return -1
+	return StorageUtil.AdjustIntValue(self, GetKeyNameForKeyCode(keyCode), -1)
 EndFunction
 
 Form[] Function GetAllMappedSpells()
@@ -374,7 +389,8 @@ Form[] Function GetAllMappedSpells()
 	int idx = 0
 	int mIdx = 0
 	While idx < keys.length
-		Form[] spells = StorageUtil.FormListToArray(self, GetKeyNameForIndex(idx))
+		int keyCode = keys[idx]
+		Form[] spells = StorageUtil.FormListToArray(self, GetKeyNameForKeyCode(keyCode))
 		int sIdx = 0
 		While sIdx < spells.Length
 			mappedSpells[mIdx] = spells[sIdx]
@@ -632,6 +648,7 @@ int activeToggleKeyCode
 Spell toggledSpell
 bool toggledSpellHasCastTime
 bool toggledSpellIsOffensive
+int toggledSpellCastingType
 bool toggledSpellCycle
 State Normal
 	Event OnBeginState()
@@ -683,6 +700,7 @@ State Normal
 					StorageUtil.SetFormValue(toggledSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
 				EndIf
 
+				toggledSpellCastingType = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", mEffect.GetCastingType())  
 				releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
 
 				;Log("Loaded spell: " + toggledSpell + "into toggle.")
@@ -698,7 +716,7 @@ State Normal
 		;Log("Charged["+chargedState+"]: OnAnimationEvent(akSource = " + akSource + ", asEventName = " + asEventName)
 		bool pAttack = akSource.GetAnimationVariableBool("bAllowRotation")
 
-		;Log("Normal:OnAnimationEvent: akSource="+akSource + ", asEventName="+asEventName+", PowerAttack="+pAttack+", offensive="+toggledSpellIsOffensive+", castTime="+toggledSpellHasCastTime)
+		;Log("Normal:OnAnimationEvent: akSource="+akSource + ", asEventName="+asEventName+", PowerAttack="+pAttack+", offensive="+toggledSpellIsOffensive+", castTime="+toggledSpellHasCastTime+ ", castingType="+toggledSpellCastingType)
 		If toggledSpellHasCastTime && !pAttack && toggledSpellIsOffensive
 			return
 		EndIf
@@ -708,6 +726,11 @@ State Normal
 				CastSpell()
 			ElseIf asEventName == "attackStop"
 				isAttacking = false
+
+				If toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
+					PlayerRef.InterruptCast()
+				EndIf
+
 				If toggledSpellCycle
 					LoadToggleSpell()
 				EndIf
@@ -729,7 +752,11 @@ State Normal
 				isBlocking = false
 				bowDrawn = False
 				toggledSpellCycle = true
-				PlayerRef.InterruptCast()
+				
+				If toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
+					PlayerRef.InterruptCast()
+				EndIf
+
 				LoadToggleSpell()
 				; If spellCastingType == CASTINGTYPE_CONCENTRATION && GetState() == "Charged" ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
 				; 	Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
@@ -1566,6 +1593,7 @@ State Disabled
 		IsCharged = false
 		IsCharging = false
 		chargedState = 0
+		toggledSpell = None
 	EndEvent
 	Event OnKeyDown(int keyCode)
 		Log("WMAG is disabled!", LogSeverity_Info)
