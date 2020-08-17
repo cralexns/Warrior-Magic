@@ -10,7 +10,7 @@ EndProperty
 bool Property IsModStarting Auto Hidden
 
 int Function GetVersion()
-	return 9
+	return 10
 EndFunction
 
 ;; REMOVE THESE
@@ -75,11 +75,12 @@ Event OnConfigInit()
 	
 	ModName = Main.ModName
 
-	chargeModes = new string[4]
+	chargeModes = new string[5]
 	chargeModes[0] = "$Instant"
 	chargeModes[1] = "$Cast Time"
 	chargeModes[2] = "$Magicka Cost"
 	chargeModes[3] = "$Overcharge"
+	chargeModes[4] = "$Toggle"
 
 	releaseModes = new string[3]
 	releaseModes[0] = "$Manual"
@@ -485,16 +486,16 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 
 	int displayIndex = spellSlotKeyOptionId.Find(option)
 	If option == spellSlotCreateIndex && keyCode != -1
-		bool setOverride = StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
+		bool hasOverride = StorageUtil.CountIntValuePrefix("WMAG_OVERRIDE_"+keyCode+"_") < 2
 		
-		If !setOverride || displayIndex == -1
+		If !hasOverride || !enableOverride || Main.GetSpellsByKey(keyCode).Length == 0
 			Spell defaultSpell = FindFirstUnmappedSpell(keyCode)
 			If defaultSpell
 				Main.BindSpellToKey(keyCode, defaultSpell)
 			EndIf
 		EndIf
 
-		If enableOverride && setOverride
+		If enableOverride && hasOverride
 			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_CHARGE", 0)
 			StorageUtil.SetIntValue(Main, "WMAG_OVERRIDE_"+keyCode+"_RELEASE", 0)
 		EndIf

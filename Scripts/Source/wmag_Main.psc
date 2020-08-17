@@ -22,16 +22,16 @@ FormList Property SoundEffects Auto ;0 = Default, 1 = Success, 2 = Fail, 3 = Alt
 FormList Property ModSpellsDuration Auto
 FormList Property ModSpellsMagnitude Auto
 
-Idle Property IdleStop_Loose Auto
+Idle Property IdleStop_Loose Auto ;OBSOLETE
 Spell Property BindingAbility Auto
 
 Perk Property SweepingAttacks Auto
 Perk Property SpellMod Auto
 
-bool Property IsCharging Auto Conditional
+bool Property IsCharging Auto Conditional ;OBSOLETE
 
-bool Property DisableChargeAnimation = true Auto
-bool Property ConcentrationCastingFix = false Auto
+bool Property DisableChargeAnimation = true Auto ;OBSOLETE
+bool Property ConcentrationCastingFix = false Auto ;OBSOLETE
 
 ;; Spell Release Settings
 int Property RELEASEMODE_MANUAL = 0 Auto
@@ -43,6 +43,7 @@ int Property SPELLCHARGE_NONE = 0 Auto Hidden ;No spell charging - everything ch
 int Property SPELLCHARGE_SPELLBASED = 1 Auto Hidden ;Spell charge time is based on the cast time of the spell.
 int Property SPELLCHARGE_MAXMAGIC = 2 Auto Hidden ;Spell charge time is based on the amount of magicka required versus magicka pool
 int Property SPELLCHARGE_OVERCHARGE = 3 Auto Hidden ;Derived from Spellbased, allow spell to be overcharged up to x2 but costs also increase.
+int Property SPELLCHARGE_TOGGLE = 4 Auto Hidden ;Toggle a spell to be continously and autonomously charged.
 
 int[] Property SpellReleaseMode Auto
 int[] Property SpellChargeMode Auto
@@ -50,7 +51,7 @@ float[] Property MinimumChargeTime Auto
 float[] Property MaximumChargeTime Auto
 
 float Property MaximumDurationModifier = 3.0 Auto
-float Property MaximumMagnitudeModifier = 1.5 Auto
+float Property MaximumMagnitudeModifier = 1.5 Auto ;OBSOLETE
 
 int Property DispelKeyModifier = 56 Auto
 
@@ -71,12 +72,13 @@ int[] validRangedTypes
 
 ;/
 	TODO:
-	1. Rework overcharge to overcharge in Charged state (but first examine why modding the magnitude does little for the damage?)
+	0. Look into applying shader to weapon with a spell or power, "Elemental Fury" does it. (Won't work on enchanted weapons)
+	1. Maybe add spell configurations tied to equipment?
 	2. Consider adding support for modifiers in keybindings.
 /;
 
 Event OnInit()
-	Version = 1.25
+	Version = 1.3
 	validMeleeTypes = StringToIntArray("1,2,3,4,5,6", ",")
 	validRangedTypes = StringToIntArray("7,12", ",")
 
@@ -160,9 +162,9 @@ Event OnPlayerLoadGame()
 		Log("Upgraded from "+oldVersion+" - enjoy bow/crossbow support!", LogLevel_Notification)
 	EndIf
 
-	If Version <= 1.2
-		Version = 1.25
-		Log("Upgraded to version 1.25", LogLevel_Notification)
+	If Version <= 1.3
+		Version = 1.3
+		Log("Upgraded to version 1.3\nAdded new charge mode toggle: Spells cast every time you attack/block\nAdded support for unarmed combat.", LogLevel_MessageBox)
 	EndIf
 
 	chargingInterval = 0.05
@@ -587,10 +589,15 @@ bool rangedEquipped = false
 int Property EQUIPPED_INVALID = 0 Auto Hidden
 int Property EQUIPPED_MELEE = 1 Auto Hidden
 int Property EQUIPPED_RANGED = 2 Auto Hidden
+int Property EQUIPPED_UNARMED = 3 Auto Hidden
 
 int Function GetEquippedType()
 	int leftType = PlayerRef.GetEquippedItemType(0)
 	int rightType = PlayerRef.GetEquippedItemType(1)
+
+	If leftType == 0 && rightType == 0
+		return EQUIPPED_MELEE
+	EndIf
 
 	If validRangedTypes.Find(leftType) != -1 || validRangedTypes.Find(rightType) != -1
 		return EQUIPPED_RANGED
@@ -621,6 +628,11 @@ int keyCodeInterruptCast
 bool safetyEnabled
 bool highLatency
 bool latencyCheck
+int activeToggleKeyCode
+Spell toggledSpell
+bool toggledSpellHasCastTime
+bool toggledSpellIsOffensive
+bool toggledSpellCycle
 State Normal
 	Event OnBeginState()
 		;Log("Normal: OnBeginState()")
@@ -651,12 +663,150 @@ State Normal
 			EndIf
 			latencyCheck = false
 		EndIf
+
+		LoadToggleSpell()
 	EndEvent
+
+	Function LoadToggleSpell()
+		toggledSpellCycle = false
+		If activeToggleKeyCode > 0
+			Spell spellToToggle = GetSpellByKey(activeToggleKeyCode)
+			If spellToToggle != toggledSpell
+				toggledSpell = spellToToggle
+				toggledSpellIsOffensive = toggledSpell.IsHostile()
+				toggledSpellHasCastTime = toggledSpell.GetCastTime() > 0 && StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+activeToggleKeyCode+"_RELEASE", SpellReleaseMode[toggledSpellIsOffensive as int]) != RELEASEMODE_AUTOMATIC
+				
+				MagicEffect mEffect = StorageUtil.GetFormValue(toggledSpell, "WMAG_CACHE_MAGEFFECT") as MagicEffect
+				If mEffect == None
+					int effectIndex = toggledSpell.GetCostliestEffectIndex()
+					mEffect = toggledSpell.GetNthEffectMagicEffect(effectIndex)
+					StorageUtil.SetFormValue(toggledSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
+				EndIf
+
+				releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
+
+				;Log("Loaded spell: " + toggledSpell + "into toggle.")
+			EndIf
+		EndIf
+	EndFunction
+
 	Event OnAnimationEvent(ObjectReference akSource, string asEventName)
-		;Log("Normal: OnAnimationEvent(), asEventName = " + asEventName)
+		If activeToggleKeyCode == 0
+			return
+		EndIf
+
+		;Log("Charged["+chargedState+"]: OnAnimationEvent(akSource = " + akSource + ", asEventName = " + asEventName)
+		bool pAttack = akSource.GetAnimationVariableBool("bAllowRotation")
+
+		;Log("Normal:OnAnimationEvent: akSource="+akSource + ", asEventName="+asEventName+", PowerAttack="+pAttack+", offensive="+toggledSpellIsOffensive+", castTime="+toggledSpellHasCastTime)
+		If toggledSpellHasCastTime && !pAttack && toggledSpellIsOffensive
+			return
+		EndIf
+
+		If toggledSpellIsOffensive ;|| spellTarget != 0
+			If asEventName == "HitFrame" || asEventName == "BowRelease"
+				CastSpell()
+			ElseIf asEventName == "attackStop"
+				isAttacking = false
+				If toggledSpellCycle
+					LoadToggleSpell()
+				EndIf
+				; If spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged && !Input.IsKeyPressed(keyCodeInterruptCast)
+				; 	;Log("Charged["+chargedState+"]: OnAnimationEvent() - attackStop => Is Concentration. Go to Normal")
+				; 	GoToState("Normal")
+				; EndIf
+			; ElseIf asEventName == "attackStart" || asEventName == "weaponSwing"
+			; 	isAttacking = true
+			EndIf
+		Else
+			If asEventName == "blockStart" || asEventName == "blockStartOut"
+				isBlocking = true
+				CastSpell()
+			ElseIf asEventName == "bowDrawStart"
+				bowDrawn = True
+				CastSpell()
+			ElseIf asEventName == "blockStop" || asEventName == "bowEnd"
+				isBlocking = false
+				bowDrawn = False
+				toggledSpellCycle = true
+				PlayerRef.InterruptCast()
+				LoadToggleSpell()
+				; If spellCastingType == CASTINGTYPE_CONCENTRATION && GetState() == "Charged" ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
+				; 	Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
+				; 	GoToState("Normal")
+				; EndIf
+			EndIf
+		EndIf
+	EndEvent
+
+	Function CastSpell()
+		Spell spellToCast = toggledSpell
+		If spellToCast == None
+			Log("Normal["+chargedState+"]: CastSpell() toggledSpell == None. Abort.")
+			Return
+		EndIf
+
+		float spellCost = spellToCast.GetEffectiveMagickaCost(PlayerRef)
+		If spellCost > PlayerRef.GetActorValue("Magicka")
+			Return
+		Else
+			PlayerRef.DamageActorValue("Magicka", spellCost)
+		EndIf
+
+		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
+			int releaseInstanceId = releaseSound.Play(PlayerRef)
+			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
+		EndIf
+
+		spellToCast.Cast(PlayerRef)
+		isCasting = true
+
+		If spellCastingType == CASTINGTYPE_CONCENTRATION
+			If concentrationSound != None && concentrationInstanceId == 0
+				concentrationInstanceId = concentrationSound.Play(PlayerRef)
+			EndIf
+
+			OnUpdate()
+		Else
+			toggledSpellCycle = true
+			isCasting = false
+			If concentrationInstanceId != 0
+				Sound.StopInstance(concentrationInstanceId)
+				concentrationInstanceId = 0
+			EndIf
+
+			If readyInstanceId != 0
+				Sound.StopInstance(readyInstanceId)
+				readyInstanceId = 0
+			EndIf
+		EndIf
+	EndFunction
+
+	Event OnUpdate()
+		;Log("Charged["+chargedState+"]: OnUpdate(), Conc Casting Fix=" + ConcentrationCastingFix + ", chargedSpell="+chargedSpell+", castingType="+spellCastingType+", spellTarget="+spellTarget+", ReleaseMode="+chargedReleaseMode)
+		Spell spellToCast = toggledSpell
+
+		If spellToCast != None && spellCastingType == CASTINGTYPE_CONCENTRATION
+			bool attackBound = spellIsHostile
+			If !attackBound
+				;Log("Charged["+chargedState+"]: OnUpdate() - bBowDrawn = " + PlayerRef.GetAnimationVariableBool("bBowDrawn"))
+				If (equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && !PlayerRef.GetAnimationVariableBool("bBowDrawn") && !bowDrawn)
+					return
+				ElseIf isCasting && spellCastingType == CASTINGTYPE_CONCENTRATION
+					If PlayerRef.GetActorValue("Magicka") > 0
+						spellToCast.Cast(PlayerRef)
+					Else
+						return
+					EndIf
+				EndIf
+
+				RegisterForSingleUpdate(0.25)
+			EndIf
+		EndIf
 	EndEvent
 
 	Event OnEndState()
+		isCasting = false
 		;Log("Normal: OnEndState()")
 	EndEvent
 EndState
@@ -716,6 +866,24 @@ State Charging
 		chargingSpellIsHostile = chargingSpell.IsHostile()
 		chargeStartTime = Utility.GetCurrentRealTime()
 
+		bool isOffensiveSpell = chargingSpellIsHostile ;&& chargingSpellTarget == 0
+
+		chargeMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_CHARGE", SpellChargeMode[isOffensiveSpell as int])
+		chargedReleaseMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_RELEASE", SpellReleaseMode[isOffensiveSpell as int])
+
+		If chargeMode == SPELLCHARGE_TOGGLE
+			If activeToggleKeyCode == chargeKeyCodeDown
+				activeToggleKeyCode = 0
+				Log("Toggle '"+chargingSpell.GetName()+"' [OFF]", LogLevel_Notification)
+			Else
+				activeToggleKeyCode = chargeKeyCodeDown
+				Log("Toggle '"+chargingSpell.GetName()+"' [ON]", LogLevel_Notification)
+			EndIf
+			ReverseCycleByKey(activeToggleKeyCode)
+			GoToState("Normal")
+			return
+		EndIf
+
 		chargingSpellTarget = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_TARGET", -1) as int
 		chargingSpellCastingType = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", -1) as int
 
@@ -733,11 +901,6 @@ State Charging
 			StorageUtil.SetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", chargingSpellCastingType)
 			StorageUtil.SetIntValue(chargingSpell, "WMAG_CACHE_TARGET", chargingSpellTarget)
 		EndIf
-
-		bool isOffensiveSpell = chargingSpellIsHostile ;&& chargingSpellTarget == 0
-
-		chargeMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_CHARGE", SpellChargeMode[isOffensiveSpell as int])
-		chargedReleaseMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_RELEASE", SpellReleaseMode[isOffensiveSpell as int])
 
 		;int deliveryType = m.GetDeliveryType()
 
@@ -1210,7 +1373,7 @@ State Charged
 				ModSpellsDuration.AddForm(spellToCast)
 				PlayerRef.SetActorValue("Variable05", modAmount)
 
-				Log(spellToCast.GetName() + " duration X" + modAmount, LogLevel_Notification)
+				Log(spellToCast.GetName() + " duration X" + modAmount, LogSeverity_Debug)
 				revertSpellMod = true
 			Else
 				StorageUtil.UnsetIntValue(spellToCast, "WMAG_MODCOUNT")
@@ -1219,7 +1382,7 @@ State Charged
 			ModSpellsMagnitude.AddForm(spellToCast)
 			PlayerRef.SetActorValue("Variable05", spellCharge)
 
-			Log(spellToCast.GetName() + " magnitude X"+spellCharge, LogLevel_Notification)
+			Log(spellToCast.GetName() + " magnitude X"+spellCharge, LogSeverity_Debug)
 			revertSpellMod = true
 		EndIf
 
@@ -1419,6 +1582,9 @@ bool Function AutoCast(bool ignoreHoldingKey = false)
 EndFunction
 
 bool Function SetCharged(bool isChargeSuccess, float overCharge = 0.0)
+EndFunction
+
+Function LoadToggleSpell()
 EndFunction
 
 ;/  ----
