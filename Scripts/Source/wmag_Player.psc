@@ -162,8 +162,8 @@ State Binding
 				Main.Log("Pressed key = " + keyName + " (" + pressedKeyCode + ")", Main.LogSeverity_Debug)
 
 				int spellIndex = -1
-				int keyIndex = Main.GetIndexByKeyCode(pressedKeyCode)
-				If keyIndex != -1 && Main.GetSpellsByIndex(keyIndex).length == 1
+				;int keyIndex = Main.GetIndexByKeyCode(pressedKeyCode)
+				If Main.GetSpellsByKey(pressedKeyCode).length == 1
 					spellIndex = 0
 				EndIf
 				

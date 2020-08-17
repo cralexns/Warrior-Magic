@@ -57,7 +57,7 @@ int Property DispelKeyModifier = 56 Auto
 
 bool Property AutonomousCharging = false Auto
 
-string Property KeyBindingIndexName = "KeyBindingIndex" Auto Hidden ; TODO: Add cycle spells to keybindings.
+string Property KeyBindingIndexName = "KeyBindingIndex" Auto Hidden
 
 string Property ChargedBeginLatencyName = "Latency1" Auto
 string Property ChargedDoneLatencyName = "Latency2" Auto
@@ -271,7 +271,33 @@ string Function GetKeyNameForKeyCode(int keyCode)
 EndFunction
 
 bool Function SetKeyByIndex(int keyIndex, int keyCode)
-	return StorageUtil.IntListSet(self, KeyBindingIndexName, keyIndex, keyCode)
+	int existingIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
+	int currentKeyCode = GetKeyCodeByIndex(keyIndex)
+	Form[] spells = GetSpellsByKey(currentKeyCode)
+
+	Log("SetKeyByIndex("+keyIndex+", "+keyCode+") => existingIndex="+existingIndex+", spells.length="+spells.length+", currentKeyCode="+currentKeyCode)
+
+	If currentKeyCode == keyCode
+		Return True
+	EndIf
+
+	If existingIndex == -1
+		; Change keybinding for slot.
+		If StorageUtil.IntListSet(self, KeyBindingIndexName, keyIndex, keyCode) != 0
+			If StorageUtil.FormListCopy(self, GetKeyNameForKeyCode(keyCode), spells)
+				StorageUtil.FormListClear(self, GetKeyNameForKeyCode(currentKeyCode))
+				RegisterForKey(keyCode)
+				return True
+			EndIf
+		EndIf
+	ElseIf existingIndex != keyIndex
+		; Switch spells between keybindings
+		Form[] existingSpells = GetSpellsByKey(keyCode)
+		
+		return StorageUtil.FormListCopy(self, GetKeyNameForKeyCode(currentKeyCode), existingSpells) && StorageUtil.FormListCopy(self, GetKeyNameForKeyCode(keyCode), spells)
+	EndIf
+	
+	return False
 EndFunction
 
 bool Function BindSpellToKey(int keyCode, Spell aSpell, int spellIndex = -1)
@@ -305,7 +331,7 @@ bool Function BindSpellToKey(int keyCode, Spell aSpell, int spellIndex = -1)
 		return true
 	EndIf
 
-	Log("Critical Error in Spell Binding Data .. (keyCode="+keyCode+",keyIndex="+keyIndex+", position="+spellIndex+")", LogSeverity_Error)
+	Log("Critical Error in Spell Binding Data .. (keyCode="+keyCode+",keyIndex="+keyIndex+", position="+spellIndex+") - clearing all keybindings :(", LogSeverity_Error)
 	StorageUtil.ClearAllObjPrefix(self, KeyBindingIndexName)
 	return false
 	
@@ -316,7 +342,8 @@ bool Function UnbindKey(int keyCode, int spellIndex)
 	If keyIndex != -1
 		string keyName = GetKeyNameForKeyCode(keyCode)
 		int spellCount = StorageUtil.FormListCount(self, keyName)
-		Log("UnbindKey("+keyCode+", "+spellIndex+") => keyName="+keyName+", spellCount="+spellCount+", keyIndex="+keyIndex)
+
+		;Log("UnbindKey("+keyCode+", "+spellIndex+") => keyName="+keyName+", spellCount="+spellCount+", keyIndex="+keyIndex)
 		If spellCount > 1 && spellIndex != -1 && StorageUtil.FormListRemoveAt(self, keyName, spellIndex)
 			return true
 		ElseIf StorageUtil.IntListRemoveAt(self, KeyBindingIndexName, keyIndex) && StorageUtil.FormListClear(self, keyName)
@@ -331,10 +358,10 @@ Spell Function GetSpellByIndex(int keyIndex, int spellIndex)
 	return StorageUtil.FormListGet(self, GetKeyNameForKeyCode(keyCode), spellIndex) as Spell
 EndFunction
 
-Form[] Function GetSpellsByIndex(int keyIndex)
-	int keyCode = GetKeyCodeByIndex(keyIndex)
-	return StorageUtil.FormListToArray(self, GetKeyNameForKeyCode(keyCode))
-EndFunction
+; Form[] Function GetSpellsByIndex(int keyIndex)
+; 	int keyCode = GetKeyCodeByIndex(keyIndex)
+; 	return StorageUtil.FormListToArray(self, GetKeyNameForKeyCode(keyCode))
+; EndFunction
 
 int Function GetKeyCodeByIndex(int index)
 	return StorageUtil.IntListGet(self, KeyBindingIndexName, index)
@@ -648,8 +675,10 @@ int activeToggleKeyCode
 Spell toggledSpell
 bool toggledSpellHasCastTime
 bool toggledSpellIsOffensive
-int toggledSpellCastingType
 bool toggledSpellCycle
+int toggledSpellCastingType
+Sound toggledSpellRelease
+Sound toggledSpellConcentration
 State Normal
 	Event OnBeginState()
 		;Log("Normal: OnBeginState()")
@@ -701,7 +730,11 @@ State Normal
 				EndIf
 
 				toggledSpellCastingType = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", mEffect.GetCastingType())  
-				releaseSound = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
+
+				If !SkipNonEssentialsForPerformance || !highLatency
+					toggledSpellRelease = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
+					toggledSpellConcentration = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
+				EndIf
 
 				;Log("Loaded spell: " + toggledSpell + "into toggle.")
 			EndIf
@@ -734,12 +767,6 @@ State Normal
 				If toggledSpellCycle
 					LoadToggleSpell()
 				EndIf
-				; If spellCastingType == CASTINGTYPE_CONCENTRATION && isCharged && !Input.IsKeyPressed(keyCodeInterruptCast)
-				; 	;Log("Charged["+chargedState+"]: OnAnimationEvent() - attackStop => Is Concentration. Go to Normal")
-				; 	GoToState("Normal")
-				; EndIf
-			; ElseIf asEventName == "attackStart" || asEventName == "weaponSwing"
-			; 	isAttacking = true
 			EndIf
 		Else
 			If asEventName == "blockStart" || asEventName == "blockStartOut"
@@ -757,11 +784,12 @@ State Normal
 					PlayerRef.InterruptCast()
 				EndIf
 
+				If concentrationInstanceId != 0
+					Sound.StopInstance(concentrationInstanceId)
+					concentrationInstanceId = 0
+				EndIf
+
 				LoadToggleSpell()
-				; If spellCastingType == CASTINGTYPE_CONCENTRATION && GetState() == "Charged" ;|| (keyCodeInterruptCast != -1 && !Input.IsKeyPressed(keyCodeInterruptCast))
-				; 	Log("Charged["+chargedState+"]: OnAnimationEvent() - blockStop => Is Concentration. Go to Normal")
-				; 	GoToState("Normal")
-				; EndIf
 			EndIf
 		EndIf
 	EndEvent
@@ -780,46 +808,37 @@ State Normal
 			PlayerRef.DamageActorValue("Magicka", spellCost)
 		EndIf
 
-		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
-			int releaseInstanceId = releaseSound.Play(PlayerRef)
+		If toggledSpellRelease != None && toggledSpellCastingType != CASTINGTYPE_CONCENTRATION
+			int releaseInstanceId = toggledSpellRelease.Play(PlayerRef)
 			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
 		EndIf
 
 		spellToCast.Cast(PlayerRef)
 		isCasting = true
 
-		If spellCastingType == CASTINGTYPE_CONCENTRATION
-			If concentrationSound != None && concentrationInstanceId == 0
-				concentrationInstanceId = concentrationSound.Play(PlayerRef)
+		If toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
+			If toggledSpellConcentration != None && concentrationInstanceId == 0
+				concentrationInstanceId = toggledSpellConcentration.Play(PlayerRef)
 			EndIf
 
 			OnUpdate()
 		Else
 			toggledSpellCycle = true
 			isCasting = false
-			If concentrationInstanceId != 0
-				Sound.StopInstance(concentrationInstanceId)
-				concentrationInstanceId = 0
-			EndIf
-
-			If readyInstanceId != 0
-				Sound.StopInstance(readyInstanceId)
-				readyInstanceId = 0
-			EndIf
 		EndIf
 	EndFunction
 
 	Event OnUpdate()
-		;Log("Charged["+chargedState+"]: OnUpdate(), Conc Casting Fix=" + ConcentrationCastingFix + ", chargedSpell="+chargedSpell+", castingType="+spellCastingType+", spellTarget="+spellTarget+", ReleaseMode="+chargedReleaseMode)
+		;Log("Normal: OnUpdate(), toggledSpell="+toggledSpell+", castingType="+toggledSpellCastingType)
 		Spell spellToCast = toggledSpell
 
-		If spellToCast != None && spellCastingType == CASTINGTYPE_CONCENTRATION
+		If spellToCast != None && isCasting && toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
 			bool attackBound = spellIsHostile
 			If !attackBound
 				;Log("Charged["+chargedState+"]: OnUpdate() - bBowDrawn = " + PlayerRef.GetAnimationVariableBool("bBowDrawn"))
 				If (equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && !PlayerRef.GetAnimationVariableBool("bBowDrawn") && !bowDrawn)
 					return
-				ElseIf isCasting && spellCastingType == CASTINGTYPE_CONCENTRATION
+				Else
 					If PlayerRef.GetActorValue("Magicka") > 0
 						spellToCast.Cast(PlayerRef)
 					Else
@@ -834,6 +853,11 @@ State Normal
 
 	Event OnEndState()
 		isCasting = false
+
+		If concentrationInstanceId != 0
+			Sound.StopInstance(concentrationInstanceId)
+			concentrationInstanceId = 0
+		EndIf
 		;Log("Normal: OnEndState()")
 	EndEvent
 EndState
@@ -1057,7 +1081,7 @@ State Charging
 			;Log("Magicka reduced by " + deduction + ", total deduction = " + chargingSpellCostPaid + " out of "+chargingSpellCostMaximum+", current magicka = " + PlayerRef.GetActorValue("Magicka"))
 		EndIf
 
-		;Log("OnUpdate.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
+		Log("OnUpdate.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
 
 		If timeSpent >= chargeTimeMaximum || endCharging
 			SetCharged(chargingSpellCostPaid >= chargingSpellCost, (chargingSpellCostPaid / (chargingSpellCost * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
@@ -1413,7 +1437,7 @@ State Charged
 			revertSpellMod = true
 		EndIf
 
-		If releaseSound != None && spellCastingType != CASTINGTYPE_CONCENTRATION
+		If releaseSound != None ;&& spellCastingType != CASTINGTYPE_CONCENTRATION
 			int releaseInstanceId = releaseSound.Play(PlayerRef)
 			;Log("Playing sound " + releaseSound + ", id = " + releaseInstanceId + " on: " + PlayerRef)
 			Sound.SetInstanceVolume(releaseInstanceId, 1.0)

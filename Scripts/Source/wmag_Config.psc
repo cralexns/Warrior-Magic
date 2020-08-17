@@ -501,19 +501,19 @@ Event OnOptionKeyMapChange(int option, int keyCode, string conflictControl, stri
 		EndIf
 	ElseIf displayIndex != -1
 		int slotIndex = spellSlotIndex[displayIndex]
-		int currentKeyCode = Main.GetKeyCodeByIndex(slotIndex)
+		;int currentKeyCode = Main.GetKeyCodeByIndex(slotIndex)
 
-		int existingIndex = Main.GetIndexByKeyCode(keyCode)
-		If existingIndex != -1 && !Main.SetKeyByIndex(existingIndex, currentKeyCode)
-			Main.Log("Failed to reassign existing keybinding on keyIndex="+existingIndex+", aborting..", Main.LogSeverity_Warning)
-			return
-		EndIf
-
+		;int existingIndex = Main.GetIndexByKeyCode(keyCode)
 		If !Main.SetKeyByIndex(slotIndex, keyCode)
-			Main.SetKeyByIndex(existingIndex, keyCode)
-			Main.Log("Failed to assign existing keybinding on keyIndex="+slotIndex+", aborting..", Main.LogSeverity_Warning)
+			Main.Log("Failed to reassign keybinding on keyIndex="+slotIndex+", aborting..", Main.LogSeverity_Warning)
 			return
 		EndIf
+
+		; If !Main.SetKeyByIndex(slotIndex, keyCode)
+		; 	Main.SetKeyByIndex(existingIndex, keyCode)
+		; 	Main.Log("Failed to assign existing keybinding on keyIndex="+slotIndex+", aborting..", Main.LogSeverity_Warning)
+		; 	return
+		; EndIf
 	EndIf
 
 	ForcePageReset()
