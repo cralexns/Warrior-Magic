@@ -483,9 +483,9 @@ int Property SOUNDEFFECT_READY = 2 Auto Hidden
 int Property SOUNDEFFECT_RELEASE = 3 Auto Hidden
 int Property SOUNDEFFECT_CASTLOOP = 4 Auto Hidden
 
-Sound Function GetSoundEffectFor(MagicEffect mgef, int soundEffectType)
+Sound Function GetSoundEffectFor(MagicEffect mgef, int soundEffectType, int offset = 0)
 	If PapyrusExtenderInstalled
-		Sound chargeSound = (SoundEffects.GetAt(soundEffectType+2) as Sound)
+		Sound chargeSound = (SoundEffects.GetAt(soundEffectType+2+offset) as Sound)
 		SoundDescriptor snd = PO3_SKSEfunctions.GetMagicEffectSound(mgef, soundEffectType)
 		If snd != None
 			PO3_SKSEfunctions.SetSoundDescriptor(chargeSound, snd)
@@ -732,8 +732,8 @@ State Normal
 				toggledSpellCastingType = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_CASTINGTYPE", mEffect.GetCastingType())  
 
 				If !SkipNonEssentialsForPerformance || !highLatency
-					toggledSpellRelease = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE)
-					toggledSpellConcentration = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP)
+					toggledSpellRelease = GetSoundEffectFor(mEffect, SOUNDEFFECT_RELEASE, 4)
+					toggledSpellConcentration = GetSoundEffectFor(mEffect, SOUNDEFFECT_CASTLOOP, 4)
 				EndIf
 
 				;Log("Loaded spell: " + toggledSpell + "into toggle.")
@@ -762,7 +762,13 @@ State Normal
 
 				If toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
 					PlayerRef.InterruptCast()
+					If concentrationInstanceId != 0
+						Sound.StopInstance(concentrationInstanceId)
+						concentrationInstanceId = 0
+					EndIf
 				EndIf
+
+				
 
 				If toggledSpellCycle
 					LoadToggleSpell()
@@ -803,12 +809,16 @@ State Normal
 
 		float spellCost = spellToCast.GetEffectiveMagickaCost(PlayerRef)
 		If spellCost > PlayerRef.GetActorValue("Magicka")
+			If concentrationInstanceId != 0
+				Sound.StopInstance(concentrationInstanceId)
+				concentrationInstanceId = 0
+			EndIf
 			Return
 		Else
 			PlayerRef.DamageActorValue("Magicka", spellCost)
 		EndIf
 
-		If toggledSpellRelease != None && toggledSpellCastingType != CASTINGTYPE_CONCENTRATION
+		If toggledSpellRelease != None
 			int releaseInstanceId = toggledSpellRelease.Play(PlayerRef)
 			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
 		EndIf
@@ -836,18 +846,17 @@ State Normal
 			bool attackBound = spellIsHostile
 			If !attackBound
 				;Log("Charged["+chargedState+"]: OnUpdate() - bBowDrawn = " + PlayerRef.GetAnimationVariableBool("bBowDrawn"))
-				If (equippedType == EQUIPPED_MELEE && !PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && !PlayerRef.GetAnimationVariableBool("bBowDrawn") && !bowDrawn)
+				If PlayerRef.GetActorValue("Magicka") > 0 && (equippedType == EQUIPPED_MELEE && PlayerRef.GetAnimationVariableBool("IsBlocking")) || (equippedType == EQUIPPED_RANGED && PlayerRef.GetAnimationVariableBool("bBowDrawn") && bowDrawn)
+					spellToCast.Cast(PlayerRef)
+					RegisterForSingleUpdate(0.25)
 					return
-				Else
-					If PlayerRef.GetActorValue("Magicka") > 0
-						spellToCast.Cast(PlayerRef)
-					Else
-						return
-					EndIf
 				EndIf
-
-				RegisterForSingleUpdate(0.25)
 			EndIf
+		EndIf
+
+		If concentrationInstanceId != 0
+			Sound.StopInstance(concentrationInstanceId)
+			concentrationInstanceId = 0
 		EndIf
 	EndEvent
 
