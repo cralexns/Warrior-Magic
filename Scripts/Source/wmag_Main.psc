@@ -15,6 +15,8 @@ bool Property PapyrusExtenderInstalled Auto
 wmag_Config Property Config Auto
 ;wmag_Player Property PlayerAlias Auto
 
+Faction Property ChargeFaction Auto
+
 FormList Property TestSpells Auto
 
 FormList Property EffectShaders Auto
@@ -239,16 +241,16 @@ Function CheckIfPapyrusExtenderInstalled()
 	If (spellTest != None)
 		MagicEffect m = spellTest.GetNthEffectMagicEffect(0)
 		If (m != None)
-			Log("Checking if PapyrusExtender is installed...", LogSeverity_Debug)
+			;Log("Checking if PapyrusExtender is installed...", LogSeverity_Debug)
 			SoundDescriptor snd = PO3_SKSEfunctions.GetMagicEffectSound(m, 1)
 			PapyrusExtenderInstalled = snd != None
-			Log("PapyrusExtenderInstalled = " + PapyrusExtenderInstalled, LogSeverity_Debug)
+			;Log("PapyrusExtenderInstalled = " + PapyrusExtenderInstalled, LogSeverity_Debug)
 		EndIf
 	EndIf
 EndFunction
 
 bool Function CheckIfPapyrusUtilInstalled()
-	Log("Checking if PapyrusUtil is installed..", LogSeverity_Debug)
+	;Log("Checking if PapyrusUtil is installed..", LogSeverity_Debug)
 	string[] testArray = PapyrusUtil.StringArray(1, "PUTest")
 	If testArray.Length == 1 && testArray[0] == "PUTest"
 		return True
@@ -697,6 +699,8 @@ State Normal
 			readyInstanceId = 0
 		EndIf
 
+		PlayerRef.SetFactionRank(ChargeFaction, 0)
+
 		If !latencyCheck
 			latencyCheck = true
 			float highestAvgLatency = MaxFloat(LatencyMaintenance(ChargedBeginLatencyName, 10), LatencyMaintenance(ChargedDoneLatencyName, 10)) * 1000
@@ -767,8 +771,6 @@ State Normal
 						concentrationInstanceId = 0
 					EndIf
 				EndIf
-
-				
 
 				If toggledSpellCycle
 					LoadToggleSpell()
@@ -922,6 +924,8 @@ State Charging
 			GoToState("Normal")
 			return
 		EndIf
+
+		PlayerRef.SetFactionRank(ChargeFaction, 1)
 
 		chargingSpellIsHostile = chargingSpell.IsHostile()
 		chargeStartTime = Utility.GetCurrentRealTime()
@@ -1251,6 +1255,9 @@ State Charged
 		EndIf
 
 		float chargedBeginTime = Utility.GetCurrentRealTime()
+
+		PlayerRef.SetFactionRank(ChargeFaction, 2)
+
 
 		; If readyInstanceId != 0
 		; 	Sound.StopInstance(readyInstanceId)
@@ -1627,6 +1634,7 @@ State Disabled
 		IsCharging = false
 		chargedState = 0
 		toggledSpell = None
+		PlayerRef.SetFactionRank(ChargeFaction, 0)
 	EndEvent
 	Event OnKeyDown(int keyCode)
 		Log("WMAG is disabled!", LogSeverity_Info)
