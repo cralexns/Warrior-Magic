@@ -320,12 +320,17 @@ bool Function BindSpellToKey(int keyCode, Spell aSpell, int spellIndex = -1)
 		EndIf
 	EndIf
 
-	If spellCount > 1 && spellIndex != 1
-		int existingSpellIndex = StorageUtil.FormListFind(self, keyName, aSpell)
+	int existingSpellIndex = StorageUtil.FormListFind(self, keyName, aSpell)
+	If spellCount > 1 && spellIndex != -1
 		If existingSpellIndex != -1
 			Spell originalSpell = StorageUtil.FormListGet(self, keyName, spellIndex) as Spell
 			StorageUtil.FormListSet(self, keyName, existingSpellIndex, originalSpell)
 		EndIf
+	EndIf
+
+	If spellIndex == -1 && existingSpellIndex != -1
+		Log("It's not possible to add the same spell to the same keybinding twice.", LogSeverity_Warning)
+		return false
 	EndIf
 
 	If ((spellIndex == -1 || spellIndex >= spellCount) && StorageUtil.FormListAdd(self, keyName, aSpell, false) != -1) || StorageUtil.FormListSet(self, keyName, spellIndex, aSpell)
@@ -381,14 +386,16 @@ Form[] Function GetSpellsByKey(int keyCode)
 	return Utility.CreateFormArray(0)
 EndFunction
 
-Spell Function GetSpellByKey(int keyCode, bool allowHostile = true, bool usePreviousCycleIndex = false)
+Spell Function GetSpellByKey(int keyCode, bool allowHostile = true, bool usePreviousCycleIndex = false, bool dontRepeat = false)
 	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
 	;Log("GetSpellByKey ("+keyCode+") => " + keyIndex)
 	If keyIndex != -1
 		string keyName = GetKeyNameForKeyCode(keyCode)
 		int cycleIndex = StorageUtil.GetIntValue(self, keyName, 0)
 		int maxLength = StorageUtil.FormListCount(self, keyName)
-		If cycleIndex >= maxLength || cycleIndex < 0
+		If dontRepeat && cycleIndex >= maxLength
+			return None;
+		ElseIf cycleIndex >= maxLength || cycleIndex < 0
 			cycleIndex = 0
 		EndIf
 
@@ -408,8 +415,23 @@ Spell Function GetSpellByKey(int keyCode, bool allowHostile = true, bool usePrev
 	return None
 EndFunction
 
+bool Function IsSpellLastInCycle(Spell spellToFind, int keyCode)
+	int keyIndex = StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode)
+	If keyIndex != -1
+		string keyName = GetKeyNameForKeyCode(keyCode)
+		int maxLength = StorageUtil.FormListCount(self, keyName)
+		int spellIndex = StorageUtil.FormListFind(self, keyName, spellToFind)
+		return spellIndex == maxLength - 1
+	EndIf
+	return False
+EndFunction
+
 int Function ReverseCycleByKey(int keyCode)
 	return StorageUtil.AdjustIntValue(self, GetKeyNameForKeyCode(keyCode), -1)
+EndFunction
+
+Function ResetCycleByKey(int keyCode)
+	StorageUtil.SetIntValue(self, GetKeyNameForKeyCode(keyCode), 0)
 EndFunction
 
 Form[] Function GetAllMappedSpells()
@@ -565,7 +587,7 @@ EndFunction
 
 float inputRegistrationTime
 Event OnKeyDown(int keyCode)
-	;Log("OnKeyDown="+keyCode + ", state=" + GetState())
+	;Log("OnKeyDown="+keyCode + ", state=" + GetState() + ", Charge Faction Rank=" + PlayerRef.GetFactionRank(ChargeFaction))
 
 	float inputRegistered = Utility.GetCurrentRealTime()
 	If StorageUtil.IntListFind(self, KeyBindingIndexName, keyCode) >= 0
@@ -772,9 +794,9 @@ State Normal
 					EndIf
 				EndIf
 
-				If toggledSpellCycle
-					LoadToggleSpell()
-				EndIf
+				; If toggledSpellCycle
+				; 	LoadToggleSpell()
+				; EndIf
 			EndIf
 		Else
 			If asEventName == "blockStart" || asEventName == "blockStartOut"
@@ -786,7 +808,7 @@ State Normal
 			ElseIf asEventName == "blockStop" || asEventName == "bowEnd"
 				isBlocking = false
 				bowDrawn = False
-				toggledSpellCycle = true
+				;toggledSpellCycle = true
 				
 				If toggledSpellCastingType == CASTINGTYPE_CONCENTRATION
 					PlayerRef.InterruptCast()
@@ -797,7 +819,7 @@ State Normal
 					concentrationInstanceId = 0
 				EndIf
 
-				LoadToggleSpell()
+				;LoadToggleSpell()
 			EndIf
 		EndIf
 	EndEvent
@@ -863,8 +885,11 @@ State Normal
 	EndEvent
 
 	Event OnEndState()
-		isCasting = false
+		If isCasting
+			PlayerRef.InterruptCast()
+		EndIf
 
+		isCasting = false
 		If concentrationInstanceId != 0
 			Sound.StopInstance(concentrationInstanceId)
 			concentrationInstanceId = 0
@@ -912,14 +937,25 @@ bool weaponsDrawn
 bool isBlocking
 bool isAttacking
 bool setChargedLock
+bool cancelToggleNext
 State Charging
 	Event OnBeginState()
 		;Log("Charging: OnBeginState(), chargeKeyCodeDown = " + chargeKeyCodeDown)
 		isBusy = true
 		chargingSuccess = false
-		chargingSpell = GetSpellByKey(chargeKeyCodeDown)
+		chargingSpell = GetSpellByKey(chargeKeyCodeDown, true, false, activeToggleKeyCode == chargeKeyCodeDown)
 
 		If chargingSpell == None
+			If activeToggleKeyCode == chargeKeyCodeDown
+				Sound soundEnd = SoundEffects.GetAt(2) as Sound
+				int soundEndId = soundEnd.Play(PlayerRef)
+				Sound.SetInstanceVolume(soundEndId, 1.0)
+
+				Log("[#"+(GetIndexByKeyCode(activeToggleKeyCode)+1)+"] [OFF]", LogLevel_Notification)
+				ResetCycleByKey(activeToggleKeyCode)
+				activeToggleKeyCode = 0
+				chargeMode = SPELLCHARGE_TOGGLE
+			EndIf
 			Log("Couldn't find spell for keyCode = " + chargeKeyCodeDown, LogSeverity_Debug)
 			GoToState("Normal")
 			return
@@ -936,16 +972,29 @@ State Charging
 		chargedReleaseMode = StorageUtil.GetIntValue(self, "WMAG_OVERRIDE_"+chargeKeyCodeDown+"_RELEASE", SpellReleaseMode[isOffensiveSpell as int])
 
 		If chargeMode == SPELLCHARGE_TOGGLE
+			Sound soundSuccess = SoundEffects.GetAt(1) as Sound
+			int successInstanceId = soundSuccess.Play(PlayerRef)
+			Sound.SetInstanceVolume(successInstanceId, 1.0)
+
+			string keyName = GetKeyNameForKeyCode(chargeKeyCodeDown)
+			int maxLength = StorageUtil.FormListCount(self, keyName)
+			int spellIndex = StorageUtil.FormListFind(self, keyName, chargingSpell)
 			If activeToggleKeyCode == chargeKeyCodeDown
-				activeToggleKeyCode = 0
-				Log("Toggle '"+chargingSpell.GetName()+"' [OFF]", LogLevel_Notification)
+				;Log("[#"+(GetIndexByKeyCode(activeToggleKeyCode)+1)+"] '"+chargingSpell.GetName()+"' [>]", LogLevel_Notification)
 			Else
 				activeToggleKeyCode = chargeKeyCodeDown
-				Log("Toggle '"+chargingSpell.GetName()+"' [ON]", LogLevel_Notification)
+				;Log("[#"+(GetIndexByKeyCode(activeToggleKeyCode)+1)+"] '"+chargingSpell.GetName()+"' [ON]", LogLevel_Notification)
 			EndIf
+
+			Log("[#"+(GetIndexByKeyCode(activeToggleKeyCode)+1)+"] '"+chargingSpell.GetName()+"' ["+(spellIndex+1)+"/"+maxLength+"]", LogLevel_Notification)
+
 			ReverseCycleByKey(activeToggleKeyCode)
 			GoToState("Normal")
 			return
+		ElseIf activeToggleKeyCode != 0
+			Log("[#"+(GetIndexByKeyCode(activeToggleKeyCode)+1)+"] [OFF]", LogLevel_Notification)
+			ResetCycleByKey(activeToggleKeyCode)
+			activeToggleKeyCode = 0
 		EndIf
 
 		chargingSpellTarget = StorageUtil.GetIntValue(chargingSpell, "WMAG_CACHE_TARGET", -1) as int
@@ -988,7 +1037,7 @@ State Charging
 				chargeTimeRequired = 0
 			EndIf
 
-			;Log("Spell cast time = " + castTime + ", charge time set to = " + chargeTimeRequired)
+			Log("Spell cast time = " + castTime + ", charge time set to = " + chargeTimeRequired + ", chargeMode="+chargeMode)
 
 			chargingSpellCost = effectiveCost			
 		Else
@@ -1202,7 +1251,11 @@ State Charging
 			Sound.StopInstance(chargingSoundInstance)
 		EndIf
 
-		If !chargingSuccess
+		If isCasting
+			PlayerRef.InterruptCast()
+		EndIf
+
+		If !chargingSuccess && chargeMode != SPELLCHARGE_TOGGLE
 			Sound soundChargeFailure = SoundEffects.GetAt(2) as Sound
 			int failureInstanceId = soundChargeFailure.Play(PlayerRef)
 			Sound.SetInstanceVolume(failureInstanceId, 1.0)
