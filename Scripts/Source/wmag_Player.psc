@@ -249,3 +249,9 @@ Event OnObjectEquipped(Form akBaseObject, ObjectReference akReference)
 		Main.OnSpellBookEquipped(b)
 	EndIf
 EndEvent
+
+Event OnRaceSwitchComplete()
+	;Main.Log("Race switch complete!")
+	RegisterEvents()
+	Main.RegisterEvents()
+EndEvent

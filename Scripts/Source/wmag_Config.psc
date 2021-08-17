@@ -277,6 +277,7 @@ Event OnPageReset(string page)
 		AddSliderOptionST("MaximumDurationModSlider", "$WMAG_DUREXTMAX", Main.MaximumDurationModifier, timesFormat)
 		AddKeyMapOptionST("DispelKeyModifierKeyMap", "$WMAG_DISPKEYMOD", Main.DispelKeyModifier)
 		AddToggleOptionST("AutonomousChargingToggle", "$WMAG_AUTONOMOUSCHARGING", Main.AutonomousCharging)
+		AddToggleOptionST("DisableChargedEffectToggle", "$WMAG_DISCHARGEDEFFECT", Main.DisableChargedEffect)
 
 		SetCursorPosition(9)
 		AddToggleOptionST("JumpAttackToggle", "$WMAG_JUMPATTACK", EnableJumpAttackHack)
@@ -1029,16 +1030,16 @@ State EnableSweepingAttacksToggle
 	EndEvent
 EndState
 
-; State DisableChargeAnimationToggle
-; 	Event OnSelectST()
-; 		Main.DisableChargeAnimation = !Main.DisableChargeAnimation
-; 		SetToggleOptionValueST(Main.DisableChargeAnimation)
-; 	EndEvent
+State DisableChargedEffectToggle
+	Event OnSelectST()
+		Main.DisableChargedEffect = !Main.DisableChargedEffect
+		SetToggleOptionValueST(Main.DisableChargedEffect)
+	EndEvent
 
-; 	Event OnHighlightST()
-; 		SetInfoText("$WMAG_DISCHARGEANIM_INFO")
-; 	EndEvent
-; EndState
+	Event OnHighlightST()
+		SetInfoText("$WMAG_DISCHARGEDEFFECT_INFO")
+	EndEvent
+EndState
 
 State MaximumChargeSlider
 	Event OnSliderOpenST()

@@ -32,6 +32,7 @@ Perk Property SpellMod Auto
 
 bool Property IsCharging Auto Conditional ;OBSOLETE
 
+bool Property DisableChargedEffect = false Auto
 bool Property DisableChargeAnimation = true Auto ;OBSOLETE
 bool Property ConcentrationCastingFix = false Auto ;OBSOLETE
 
@@ -87,8 +88,8 @@ Event OnInit()
 	toggledSpell = new Spell[2]
 	toggledSpellHasCastTime = new bool[2]
 	toggledSpellCastingType = new int[2]
-	toggledSpellRelease = new Sound[2]
-	toggledSpellConcentration = new Sound[2]
+	toggledSpellRelease = new Form[2]
+	toggledSpellConcentration = new Form[2]
 	activeToggleKeyCode = new int[2]
 
 	If SpellChargeMode.Length < 2 || SpellReleaseMode.Length < 2 || MaximumChargeTime.Length < 2 || MinimumChargeTime.Length < 2
@@ -190,11 +191,13 @@ Event OnPlayerLoadGame()
 	EndIf
 
 	If Version < 1.32
+		Version = 1.32
+		
 		toggledSpell = new Spell[2]
 		toggledSpellHasCastTime = new bool[2]
 		toggledSpellCastingType = new int[2]
-		toggledSpellRelease = new Sound[2]
-		toggledSpellConcentration = new Sound[2]
+		toggledSpellRelease = new Form[2]
+		toggledSpellConcentration = new Form[2]
 		activeToggleKeyCode = new int[2]
 
 		Log("Upgraded to version 1.32\nYou can now have one offensive and one defensive toggle keybind active at the same time.", LogLevel_MessageBox)
@@ -719,11 +722,11 @@ Spell[] toggledSpell
 bool[] toggledSpellHasCastTime
 bool toggledSpellIsOffensive
 int[] toggledSpellCastingType
-Sound[] toggledSpellRelease
-Sound[] toggledSpellConcentration
+Form[] toggledSpellRelease
+Form[] toggledSpellConcentration
 State Normal
 	Event OnBeginState()
-		;Log("Normal: OnBeginState()")
+		Log("Normal: OnBeginState()")
 		
 		If chargedShader != None
 			chargedShader.Stop(PlayerRef)
@@ -873,7 +876,7 @@ State Normal
 		EndIf
 
 		If toggledSpellRelease[isOffensive] != None
-			int releaseInstanceId = toggledSpellRelease[isOffensive].Play(PlayerRef)
+			int releaseInstanceId = (toggledSpellRelease[isOffensive] as Sound).Play(PlayerRef)
 			Sound.SetInstanceVolume(releaseInstanceId, 1.0)
 			Sound.StopInstance(releaseInstanceId)
 		EndIf
@@ -883,7 +886,7 @@ State Normal
 
 		If toggledSpellCastingType[isOffensive] == CASTINGTYPE_CONCENTRATION
 			If toggledSpellConcentration[isOffensive] != None && concentrationInstanceId == 0
-				concentrationInstanceId = toggledSpellConcentration[isOffensive].Play(PlayerRef)
+				concentrationInstanceId = (toggledSpellConcentration[isOffensive] as Sound).Play(PlayerRef)
 			EndIf
 			toggledSpellIsOffensive = isOffensive
 			OnUpdate()
@@ -982,8 +985,8 @@ State Charging
 		isBusy = true
 		chargingSuccess = false
 		int toggleIdx = activeToggleKeyCode.Find(chargeKeyCodeDown)
-		chargingSpell = GetSpellByKey(chargeKeyCodeDown, true, false, activeToggleKeyCode[toggleIdx] == chargeKeyCodeDown)
-
+		chargingSpell = GetSpellByKey(chargeKeyCodeDown, true, false, toggleIdx >= 0 && activeToggleKeyCode[toggleIdx] == chargeKeyCodeDown)
+		;Log("toggleIdx="+toggleIdx)
 		If chargingSpell == None
 			
 			If toggleIdx >= 0
@@ -1079,7 +1082,7 @@ State Charging
 				chargeTimeRequired = 0
 			EndIf
 
-			Log("Spell cast time = " + castTime + ", charge time set to = " + chargeTimeRequired + ", chargeMode="+chargeMode)
+			;Log("Spell cast time = " + castTime + ", charge time set to = " + chargeTimeRequired + ", chargeMode="+chargeMode)
 
 			chargingSpellCost = effectiveCost			
 		Else
@@ -1185,7 +1188,7 @@ State Charging
 			;Log("Magicka reduced by " + deduction + ", total deduction = " + chargingSpellCostPaid + " out of "+chargingSpellCostMaximum+", current magicka = " + PlayerRef.GetActorValue("Magicka"))
 		EndIf
 
-		Log("OnUpdate.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
+		;Log("OnUpdate.. ((" + timeSpent + ")-"+chargeTimeRequired+") / "+overchargeTime+") * "+MaximumOverchargeModifier+"="+((timeSpent-chargeTimeRequired) / overchargeTime) * MaximumOverchargeModifier)
 
 		If timeSpent >= chargeTimeMaximum || endCharging
 			SetCharged(chargingSpellCostPaid >= chargingSpellCost, (chargingSpellCostPaid / (chargingSpellCost * MaximumOverchargeModifier)) * MaximumOverchargeModifier)
@@ -1374,7 +1377,7 @@ State Charged
 			StorageUtil.SetFormValue(chargedSpell, "WMAG_CACHE_MAGEFFECT", mEffect)
 		EndIf
 
-		bool skipChargedShader = spellCastingType == CASTINGTYPE_CONCENTRATION || (chargedReleaseMode == RELEASEMODE_AUTOMATIC || (chargedReleaseMode == RELEASEMODE_KEYUP && (!Input.IsKeyPressed(keyCodeInterruptCast))))
+		bool skipChargedShader = DisableChargedEffect || spellCastingType == CASTINGTYPE_CONCENTRATION || (chargedReleaseMode == RELEASEMODE_AUTOMATIC || (chargedReleaseMode == RELEASEMODE_KEYUP && (!Input.IsKeyPressed(keyCodeInterruptCast))))
 
 		If !SkipNonEssentialsForPerformance || !highLatency
 			If !skipChargedShader
@@ -1625,6 +1628,11 @@ State Charged
 					If PlayerRef.GetActorValue("Magicka") > 0
 						spellToCast.Cast(PlayerRef)
 					Else
+						UI.Invoke("HUD Menu", "_root.HUDMovieBaseInstance.StartMagickaBlinking")
+						Sound soundEnd = SoundEffects.GetAt(2) as Sound
+						int soundEndId = soundEnd.Play(PlayerRef)
+						Sound.SetInstanceVolume(soundEndId, 1.0)
+
 						GoToState("Normal")
 						return
 					EndIf
